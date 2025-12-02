@@ -29,3 +29,11 @@ type Order struct {
 	Total     float64   `json:"total"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+// UserState represents the state of a user in a conversation.
+type UserState int
+
+const (
+	StateNone UserState = iota
+	StateWaitingForAmount
+)

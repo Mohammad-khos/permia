@@ -25,6 +25,9 @@ func (h *Handler) Start(c telebot.Context) error {
 	// Send welcome message
 	welcomeMsg := "Welcome to *Permia* Bot\\! Your one\\-stop shop for AI accounts\\."
 
+	// Reset user state to none when starting
+	h.botService.SetUserState(c.Sender().ID, 0) // StateNone
+
 	return c.Send(welcomeMsg, &telebot.SendOptions{
 		ParseMode:   telebot.ModeMarkdownV2,
 		ReplyMarkup: menus.MainMenuMarkup,

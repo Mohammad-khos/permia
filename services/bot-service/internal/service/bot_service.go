@@ -102,6 +102,16 @@ func (s *BotService) FormatProfile(user *domain.User) string {
 	return builder.String()
 }
 
+// SetUserState sets the state of a user
+func (s *BotService) SetUserState(userID int64, state domain.UserState) {
+	s.sessionRepo.SetState(userID, state)
+}
+
+// GetUserState gets the state of a user
+func (s *BotService) GetUserState(userID int64) domain.UserState {
+	return s.sessionRepo.GetState(userID)
+}
+
 // escapeMarkdown escapes characters that have special meaning in MarkdownV2.
 func escapeMarkdown(s string) string {
 	var result strings.Builder

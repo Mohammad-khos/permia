@@ -25,12 +25,6 @@ var (
 	BackMarkup    = &telebot.ReplyMarkup{ResizeKeyboard: true}
 	BtnBackToMain = BackMarkup.Text("🔙 بازگشت به منوی اصلی")
 
-	// Category Buttons (will be set dynamically)
-	CategoryMarkup = &telebot.ReplyMarkup{ResizeKeyboard: true}
-
-	// Products by Category (will be set dynamically)
-	ProductsMarkup = &telebot.ReplyMarkup{ResizeKeyboard: true}
-
 	// Wallet Menu
 	WalletMarkup    = &telebot.ReplyMarkup{ResizeKeyboard: true}
 	BtnChargeWallet = WalletMarkup.Text("➕ شارژ کیف پول")
@@ -60,9 +54,22 @@ func NewHandler(botService *service.BotService, coreClient *core.Client, logger 
 }
 
 func (h *Handler) MainMenu(c telebot.Context) error {
-	msg := "🏠 منوی اصلی\n\nچه کاری می\u200cخواهید انجام دهید؟"
+	msg := "🏠 منوی اصلی\n\nچه کاری می‌خواهید انجام دهید؟"
+	
+	// Create inline markup for main menu
+	inlineMainMenuMarkup := &telebot.ReplyMarkup{ResizeKeyboard: true}
+	btnBuy := inlineMainMenuMarkup.Data("🛒 خرید اشتراک", "buy")
+	btnProfile := inlineMainMenuMarkup.Data("👤 پروفایل", "profile")
+	btnWallet := inlineMainMenuMarkup.Data("💳 کیف پول", "wallet")
+	btnSupport := inlineMainMenuMarkup.Data("📞 پشتیبانی", "support")
+	
+	inlineMainMenuMarkup.Inline(
+		inlineMainMenuMarkup.Row(btnBuy, btnProfile),
+		inlineMainMenuMarkup.Row(btnWallet, btnSupport),
+	)
+
 	return c.Send(msg, &telebot.SendOptions{
-		ReplyMarkup: MainMenuMarkup,
+		ReplyMarkup: inlineMainMenuMarkup,
 	})
 }
 
@@ -86,20 +93,38 @@ func (h *Handler) Buy(c telebot.Context) error {
 		categories[p.Category] = true
 	}
 
-	// Create category buttons
+	// Create category buttons (both text and inline versions)
+	// Text buttons for backward compatibility
 	categoryMarkup := &telebot.ReplyMarkup{ResizeKeyboard: true}
 	var catRows []telebot.Row
 
+	// Also create inline buttons with callback data
+	inlineCategoryMarkup := &telebot.ReplyMarkup{ResizeKeyboard: true}
+	var inlineCatRows []telebot.Row
+
 	for cat := range categories {
+		// Text button
 		btn := categoryMarkup.Text(fmt.Sprintf("📁 %s", cat))
 		catRows = append(catRows, categoryMarkup.Row(btn))
+		
+		// Inline button with callback
+		inlineBtn := inlineCategoryMarkup.Data(fmt.Sprintf("📁 %s", h.escapeMarkdown(cat)), fmt.Sprintf("category:%s", cat))
+		inlineCatRows = append(inlineCatRows, inlineCategoryMarkup.Row(inlineBtn))
 	}
+	
+	// Add back button to both
 	catRows = append(catRows, categoryMarkup.Row(BtnBackToMain))
+	inlineCatRows = append(inlineCatRows, inlineCategoryMarkup.Row(inlineCategoryMarkup.Data("🔙 بازگشت به منوی اصلی", "main_menu")))
+	
+	// Set up markups
 	categoryMarkup.Reply(catRows...)
+	inlineCategoryMarkup.Inline(inlineCatRows...)
 
-	msg := "🛍️ دسته\u200cای را انتخاب کنید:"
+	msg := "🛍️ دسته‌ای را انتخاب کنید:"
+	
+	// Send with inline markup for better UX
 	return c.Send(msg, &telebot.SendOptions{
-		ReplyMarkup: categoryMarkup,
+		ReplyMarkup: inlineCategoryMarkup,
 	})
 }
 
@@ -117,14 +142,19 @@ func (h *Handler) Profile(c telebot.Context) error {
 		"👤 *پروفایل شما*\n\n"+
 			"*نام کاربری:* @%s\n"+
 			"*شناسه تلگرام:* `%d`\n"+
-			"*عضویت از:* به\u200cزودی",
+			"*عضویت از:* به‌زودی",
 		user.Username,
 		c.Sender().ID,
 	)
 
+	// Create inline markup for back button
+	inlineBackMarkup := &telebot.ReplyMarkup{ResizeKeyboard: true}
+	btnBack := inlineBackMarkup.Data("🔙 بازگشت به منوی اصلی", "main_menu")
+	inlineBackMarkup.Inline(inlineBackMarkup.Row(btnBack))
+
 	return c.Send(profileMsg, &telebot.SendOptions{
 		ParseMode:   telebot.ModeMarkdownV2,
-		ReplyMarkup: BackMarkup,
+		ReplyMarkup: inlineBackMarkup,
 	})
 }
 
@@ -145,9 +175,18 @@ func (h *Handler) Wallet(c telebot.Context) error {
 		user.Balance,
 	)
 
+	// Create inline markup for charge button
+	inlineWalletMarkup := &telebot.ReplyMarkup{ResizeKeyboard: true}
+	btnCharge := inlineWalletMarkup.Data("➕ شارژ کیف پول", "charge_wallet")
+	btnBack := inlineWalletMarkup.Data("🔙 بازگشت به منوی اصلی", "main_menu")
+	inlineWalletMarkup.Inline(
+		inlineWalletMarkup.Row(btnCharge),
+		inlineWalletMarkup.Row(btnBack),
+	)
+
 	return c.Send(walletMsg, &telebot.SendOptions{
 		ParseMode:   telebot.ModeMarkdownV2,
-		ReplyMarkup: WalletMarkup,
+		ReplyMarkup: inlineWalletMarkup,
 	})
 }
 
@@ -155,13 +194,18 @@ func (h *Handler) Wallet(c telebot.Context) error {
 func (h *Handler) Support(c telebot.Context) error {
 	supportMsg := "📞 *پشتیبانی*\n\n" +
 		"برای هرگونه مشکل یا سوال، با ما تماس بگیرید:\n\n" +
-		"📧 ایمیل: support@permia.com\n" +
-		"💬 تلگرام: @permia_support\n\n" +
+		"📧 ایمیل: support@permia\\.com\n" +
+		"💬 تلگرام: @AdminID\n\n" +
 		"ما آماده کمک هستیم\\!"
+
+	// Create inline markup for back button
+	inlineBackMarkup := &telebot.ReplyMarkup{ResizeKeyboard: true}
+	btnBack := inlineBackMarkup.Data("🔙 بازگشت به منوی اصلی", "main_menu")
+	inlineBackMarkup.Inline(inlineBackMarkup.Row(btnBack))
 
 	return c.Send(supportMsg, &telebot.SendOptions{
 		ParseMode:   telebot.ModeMarkdownV2,
-		ReplyMarkup: BackMarkup,
+		ReplyMarkup: inlineBackMarkup,
 	})
 }
 
@@ -175,7 +219,7 @@ func (h *Handler) ShowProducts(c telebot.Context, category string) error {
 	// Filter by category
 	var filtered []domain.Product
 	for _, p := range products {
-		if strings.Contains(p.Category, strings.TrimPrefix(category, "📁 ")) {
+		if p.Category == category {
 			filtered = append(filtered, p)
 		}
 	}
@@ -184,24 +228,45 @@ func (h *Handler) ShowProducts(c telebot.Context, category string) error {
 		return c.Send("📭 در این دسته محصولی موجود نیست.")
 	}
 
-	// Create product selection buttons
+	// Create product selection buttons (both text and inline versions)
+	// Text buttons for backward compatibility
 	productsMarkup := &telebot.ReplyMarkup{ResizeKeyboard: true}
 	var prodRows []telebot.Row
 
+	// Also create inline buttons with callback data
+	inlineProductsMarkup := &telebot.ReplyMarkup{ResizeKeyboard: true}
+	var inlineProdRows []telebot.Row
+
 	for _, p := range filtered {
+		// Text button
 		btn := productsMarkup.Text(fmt.Sprintf("%s - %.0f T", p.Name, p.Price))
 		prodRows = append(prodRows, productsMarkup.Row(btn))
+		
+		// Inline button with callback
+		displayName := h.escapeMarkdown(p.Name)
+		inlineBtn := inlineProductsMarkup.Data(fmt.Sprintf("%s - %.0f T", displayName, p.Price), fmt.Sprintf("product:%s|%.0f", p.Name, p.Price))
+		inlineProdRows = append(inlineProdRows, inlineProductsMarkup.Row(inlineBtn))
 	}
+	
+	// Add back button to both
 	prodRows = append(prodRows, productsMarkup.Row(BtnBackToMain))
+	inlineProdRows = append(inlineProdRows, inlineProductsMarkup.Row(inlineProductsMarkup.Data("🔙 بازگشت به منوی اصلی", "main_menu")))
+	
+	// Set up markups
 	productsMarkup.Reply(prodRows...)
+	inlineProductsMarkup.Inline(inlineProdRows...)
 
 	msg := fmt.Sprintf("📦 *%s*\n\nبرای خرید یک محصول انتخاب کنید:",
-		strings.TrimPrefix(category, "📁 "))
+		h.escapeMarkdown(category))
+	
+	// Send with inline markup for better UX
 	return c.Send(msg, &telebot.SendOptions{
 		ParseMode:   telebot.ModeMarkdownV2,
-		ReplyMarkup: productsMarkup,
+		ReplyMarkup: inlineProductsMarkup,
 	})
-} // ProcessProductOrder handles product selection and creates order
+}
+
+// ProcessProductOrder handles product selection and creates order
 func (h *Handler) ProcessProductOrder(c telebot.Context, productTitle string, price float64) error {
 	h.logger.Infof("User %d ordering product: %s", c.Sender().ID, productTitle)
 
@@ -221,9 +286,18 @@ func (h *Handler) ProcessProductOrder(c telebot.Context, productTitle string, pr
 
 		// Check for insufficient funds
 		if strings.Contains(err.Error(), "insufficient") {
-			return c.Send("💸 *موجودی ناکافی*\n\nکیف پول شما به اندازه کافی شارژ ندارد\\. \n\nآیا می\u200cخواهید کیف پول خود را شارژ کنید؟", &telebot.SendOptions{
+			// Create inline markup for wallet button
+			insufficientMarkup := &telebot.ReplyMarkup{ResizeKeyboard: true}
+			btnCharge := insufficientMarkup.Data("➕ شارژ کیف پول", "charge_wallet")
+			btnBack := insufficientMarkup.Data("🔙 بازگشت به منوی اصلی", "main_menu")
+			insufficientMarkup.Inline(
+				insufficientMarkup.Row(btnCharge),
+				insufficientMarkup.Row(btnBack),
+			)
+			
+			return c.Send("💸 *موجودی ناکافی*\n\nکیف پول شما به اندازه کافی شارژ ندارد\\. \n\nآیا می‌خواهید کیف پول خود را شارژ کنید؟", &telebot.SendOptions{
 				ParseMode:   telebot.ModeMarkdownV2,
-				ReplyMarkup: WalletMarkup,
+				ReplyMarkup: insufficientMarkup,
 			})
 		}
 
@@ -242,16 +316,26 @@ func (h *Handler) ProcessProductOrder(c telebot.Context, productTitle string, pr
 		order.DeliveredData,
 	)
 
+	// Create inline markup for main menu button
+	successMarkup := &telebot.ReplyMarkup{ResizeKeyboard: true}
+	btnMainMenu := successMarkup.Data("🏠 منوی اصلی", "main_menu")
+	successMarkup.Inline(successMarkup.Row(btnMainMenu))
+
 	return c.Send(deliveryMsg, &telebot.SendOptions{
 		ParseMode:   telebot.ModeMarkdownV2,
-		ReplyMarkup: MainMenuMarkup,
+		ReplyMarkup: successMarkup,
 	})
+
 }
 
 // ChargeWallet initiates wallet charging
 func (h *Handler) ChargeWallet(c telebot.Context) error {
 	h.logger.Infof("User %d requesting wallet charge", c.Sender().ID)
-	return c.Send("💰 *مقدار شارژ را (به تومان) وارد کنید:*\n\nمثال: 100000", &telebot.SendOptions{
+	
+	// Set user state to waiting for amount
+	h.botService.SetUserState(c.Sender().ID, domain.StateWaitingForAmount)
+	
+	return c.Send("💰 *مقدار شارژ را \\(به تومان\\) وارد کنید:*\n\nمثال: 100000", &telebot.SendOptions{
 		ParseMode: telebot.ModeMarkdownV2,
 	})
 }
@@ -265,8 +349,15 @@ func (h *Handler) ProcessChargeAmount(c telebot.Context, amountStr string) error
 
 	h.logger.Infof("User %d charging wallet with amount: %.0f", c.Sender().ID, amount)
 
+	// Get user to get user ID
+	user, err := h.botService.GetProfile(c)
+	if err != nil {
+		h.logger.Errorf("Failed to get user for payment: %v", err)
+		return c.Send("❌ خطا در پردازش پرداخت. لطفا دوباره تلاش کنید.")
+	}
+
 	// Get payment link from core service
-	paymentLink, err := h.coreClient.GetPaymentLink(0, amount) // userID will be set by core service
+	paymentLink, err := h.coreClient.GetPaymentLink(user.ID, amount)
 	if err != nil {
 		h.logger.Errorf("Failed to get payment link: %v", err)
 		return c.Send("❌ ایجاد لینک پرداخت ناموفق بود. لطفا دوباره تلاش کنید.")
@@ -274,7 +365,7 @@ func (h *Handler) ProcessChargeAmount(c telebot.Context, amountStr string) error
 
 	// Create inline keyboard with payment link
 	inlineMarkup := &telebot.ReplyMarkup{}
-	btn := inlineMarkup.URL("💳 پرداخت با زرین\u200cپال", paymentLink)
+	btn := inlineMarkup.URL("💳 پرداخت با زرین‌پال", paymentLink)
 	inlineMarkup.Inline(inlineMarkup.Row(btn))
 
 	chargeMsg := fmt.Sprintf(
@@ -284,18 +375,38 @@ func (h *Handler) ProcessChargeAmount(c telebot.Context, amountStr string) error
 		amount,
 	)
 
+	// Create back button
+	backBtn := inlineMarkup.Data("🔙 بازگشت به منوی اصلی", "main_menu")
+	inlineMarkup.Inline(
+		inlineMarkup.Row(btn),
+		inlineMarkup.Row(backBtn),
+	)
+
 	return c.Send(chargeMsg, &telebot.SendOptions{
 		ParseMode:   telebot.ModeMarkdownV2,
 		ReplyMarkup: inlineMarkup,
 	})
 }
 
+// Helper function to escape markdown characters
+func (h *Handler) escapeMarkdown(s string) string {
+	var result strings.Builder
+	for _, r := range s {
+		if strings.ContainsRune("._*~`>#+-=|{}!", r) {
+			result.WriteRune('\\')
+		}
+		result.WriteRune(r)
+	}
+	return result.String()
+}
+
 // Helper function to extract SKU from product title
 func extractSKU(title string) string {
-	// This is a simplified extraction - in production you'd want better parsing
-	parts := strings.Fields(title)
+	// Remove price part and extract SKU
+	parts := strings.Split(title, " - ")
 	if len(parts) > 0 {
-		return strings.ToLower(parts[0])
+		// Return the first part as SKU (product name)
+		return strings.ToLower(strings.ReplaceAll(parts[0], " ", "-"))
 	}
 	return "unknown"
 }

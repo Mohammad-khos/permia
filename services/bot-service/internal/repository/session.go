@@ -1,19 +1,15 @@
 package repository
 
-import "sync"
-
-// UserState represents the state of a user in a conversation.
-type UserState int
-
-const (
-	StateNone UserState = iota
-	StateWaitingForAmount
+import (
+	"sync"
+	
+	"Permia/bot-service/internal/domain"
 )
 
 // SessionRepository defines the interface for a user session store.
 type SessionRepository interface {
-	SetState(userID int64, state UserState)
-	GetState(userID int64) UserState
+	SetState(userID int64, state domain.UserState)
+	GetState(userID int64) domain.UserState
 }
 
 // InMemorySessionRepository is an in-memory implementation of SessionRepository.
@@ -25,14 +21,14 @@ func NewInMemorySessionRepository() *InMemorySessionRepository {
 	return &InMemorySessionRepository{}
 }
 
-func (r *InMemorySessionRepository) SetState(userID int64, state UserState) {
+func (r *InMemorySessionRepository) SetState(userID int64, state domain.UserState) {
 	r.states.Store(userID, state)
 }
 
-func (r *InMemorySessionRepository) GetState(userID int64) UserState {
+func (r *InMemorySessionRepository) GetState(userID int64) domain.UserState {
 	state, ok := r.states.Load(userID)
 	if !ok {
-		return StateNone
+		return domain.StateNone
 	}
-	return state.(UserState)
+	return state.(domain.UserState)
 }

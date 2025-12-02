@@ -2,9 +2,12 @@ package main
 
 import (
 	"log"
+	"strconv"
+	"strings"
 	"time"
 
 	"Permia/bot-service/internal/config"
+	"Permia/bot-service/internal/domain"
 	"Permia/bot-service/internal/handler"
 	"Permia/bot-service/internal/handler/commands"
 	"Permia/bot-service/internal/handler/menus"
@@ -62,70 +65,148 @@ func main() {
 	h.Register()
 
 	// Register text message handlers for interactive flows
-	registerMessageHandlers(bot, menuHandler, sugar)
+	registerMessageHandlers(bot, menuHandler, sessionRepo, sugar)
 
 	sugar.Info("🤖 Bot is starting...")
 	bot.Start()
 }
 
 // registerMessageHandlers registers text message handlers for interactive bot flows
-func registerMessageHandlers(bot *telebot.Bot, menuHandler *menus.Handler, logger *zap.SugaredLogger) {
+func registerMessageHandlers(bot *telebot.Bot, menuHandler *menus.Handler, sessionRepo repository.SessionRepository, logger *zap.SugaredLogger) {
+	// Handle text messages
 	bot.Handle(telebot.OnText, func(c telebot.Context) error {
 		text := c.Text()
-		logger.Debugf("Received text from %d: %s", c.Sender().ID, text)
+		userID := c.Sender().ID
+		logger.Debugf("Received text from %d: %s", userID, text)
 
-		// Handle main menu buttons
-		if text == "🛒 خرید اشتراک" {
-			return menuHandler.Buy(c)
-		}
-		if text == "👤 پروفایل" {
-			return menuHandler.Profile(c)
-		}
-		if text == "💳 کیف پول" {
-			return menuHandler.Wallet(c)
-		}
-		if text == "📞 پشتیبانی" {
-			return menuHandler.Support(c)
-		}
-		if text == "🔙 بازگشت به منوی اصلی" {
-			return menuHandler.MainMenu(c)
-		}
-		if text == "➕ شارژ کیف پول" {
-			return menuHandler.ChargeWallet(c)
-		}
+		// Get current user state
+		state := sessionRepo.GetState(userID)
 
-		// Handle category selection
-		if len(text) > 2 && text[0:2] == "📁 " {
-			return menuHandler.ShowProducts(c, text)
-		}
-
-		// Handle product purchase
-		// Check if it looks like a product selection (contains price indicator)
-		if len(text) > 2 && text[len(text)-1] == 'T' {
-			// Extract product name and price
-			// This is simplified - in production you'd store state
-			logger.Infof("User %d selecting product: %s", c.Sender().ID, text)
-			return menuHandler.ProcessProductOrder(c, text, 0)
-		}
-
-		// Handle wallet charge amount input
-		// If we're expecting a number (wallet charge flow)
-		if _, err := parseAmount(text); err == nil {
+		// Handle state-specific inputs first
+		if state == domain.StateWaitingForAmount {
+			// User is expected to enter an amount
+			amount, err := strconv.ParseFloat(strings.TrimSpace(text), 64)
+			if err != nil || amount <= 0 {
+				return c.Send("❌ مقدار نامعتبر است. لطفا عدد معتبر وارد کنید.")
+			}
+			// Reset state after processing
+			sessionRepo.SetState(userID, domain.StateNone)
 			return menuHandler.ProcessChargeAmount(c, text)
 		}
 
+		// Handle main menu buttons (these should reset state)
+		if text == "🛒 خرید اشتراک" {
+			sessionRepo.SetState(userID, domain.StateNone)
+			return menuHandler.Buy(c)
+		}
+		if text == "👤 پروفایل" {
+			sessionRepo.SetState(userID, domain.StateNone)
+			return menuHandler.Profile(c)
+		}
+		if text == "💳 کیف پول" {
+			sessionRepo.SetState(userID, domain.StateNone)
+			return menuHandler.Wallet(c)
+		}
+		if text == "📞 پشتیبانی" {
+			sessionRepo.SetState(userID, domain.StateNone)
+			return menuHandler.Support(c)
+		}
+		if text == "🔙 بازگشت به منوی اصلی" {
+			sessionRepo.SetState(userID, domain.StateNone)
+			return menuHandler.MainMenu(c)
+		}
+		if text == "➕ شارژ کیف پول" {
+			// Set state to waiting for amount
+			sessionRepo.SetState(userID, domain.StateWaitingForAmount)
+			return menuHandler.ChargeWallet(c)
+		}
+
+		// Handle category selection (text version)
+		if len(text) > 2 && text[0:2] == "📁 " {
+			sessionRepo.SetState(userID, domain.StateNone)
+			category := strings.TrimPrefix(text, "📁 ")
+			return menuHandler.ShowProducts(c, category)
+		}
+
+		// Handle product purchase (text version)
+		// Check if it looks like a product selection (contains price indicator)
+		if len(text) > 2 && text[len(text)-1] == 'T' {
+			sessionRepo.SetState(userID, domain.StateNone)
+			// Extract product name and price
+			logger.Infof("User %d selecting product: %s", userID, text)
+			return menuHandler.ProcessProductOrder(c, text, 0)
+		}
+
 		// Default response for unhandled text
-		return c.Send("❓ متوجه نشدم. لطفا از دکمه\u200cهای منو استفاده کنید.", &telebot.SendOptions{
+		return c.Send("❓ متوجه نشدم. لطفا از دکمه‌های منو استفاده کنید.", &telebot.SendOptions{
 			ReplyMarkup: menus.MainMenuMarkup,
 		})
+	})
+
+	// Handle callback queries (inline buttons)
+	bot.Handle(telebot.OnCallback, func(c telebot.Context) error {
+		data := c.Data()
+		userID := c.Sender().ID
+		logger.Debugf("Received callback from %d: %s", userID, data)
+
+		// Acknowledge the callback
+		defer c.Respond()
+
+		// Reset state for all callback queries (navigation)
+		sessionRepo.SetState(userID, domain.StateNone)
+
+		// Handle main menu callback
+		if data == "main_menu" {
+			return menuHandler.MainMenu(c)
+		}
+
+		// Handle main menu buttons
+		if data == "buy" {
+			return menuHandler.Buy(c)
+		}
+		if data == "profile" {
+			return menuHandler.Profile(c)
+		}
+		if data == "wallet" {
+			return menuHandler.Wallet(c)
+		}
+		if data == "support" {
+			return menuHandler.Support(c)
+		}
+
+		// Handle wallet charge button
+		if data == "charge_wallet" {
+			// Set state to waiting for amount
+			sessionRepo.SetState(userID, domain.StateWaitingForAmount)
+			return menuHandler.ChargeWallet(c)
+		}
+
+		// Handle category selection via callback
+		if strings.HasPrefix(data, "category:") {
+			category := strings.TrimPrefix(data, "category:")
+			return menuHandler.ShowProducts(c, category)
+		}
+
+		// Handle product selection via callback
+		if strings.HasPrefix(data, "product:") {
+			// Parse product data
+			productData := strings.Split(strings.TrimPrefix(data, "product:"), "|")
+			if len(productData) >= 2 {
+				productTitle := productData[0]
+				price, err := strconv.ParseFloat(productData[1], 64)
+				if err != nil {
+					return c.Send("❌ خطا در پردازش محصول.")
+				}
+				return menuHandler.ProcessProductOrder(c, productTitle, price)
+			}
+		}
+
+		// Default response for unhandled callbacks
+		return c.Send("❓ متوجه نشدم. لطفا از دکمه‌های منو استفاده کنید.")
 	})
 }
 
 // parseAmount is a helper to check if text is a valid amount
 func parseAmount(text string) (float64, error) {
-	// This is called by the message handler above
-	// Will be used to parse wallet charge amounts
-	var amount float64
-	_ = text // Placeholder to avoid unused import warning
-	return amount, nil
+	return strconv.ParseFloat(strings.TrimSpace(text), 64)
 }
