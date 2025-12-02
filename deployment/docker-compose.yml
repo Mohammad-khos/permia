@@ -1,0 +1,152 @@
+version: "3.8"
+
+services:
+  # --- Traefik Reverse Proxy & Load Balancer ---
+  traefik:
+    image: traefik:v3.0
+    container_name: permia_traefik
+    restart: always
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--api.dashboard=true"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080" # Traefik dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - permia_network
+    environment:
+      - TZ=UTC
+
+  # --- Database ---
+  postgres:
+    image: postgres:15-alpine
+    container_name: permia_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "${DB_PORT}:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - permia_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # --- Core Service ---
+  core-service:
+    build:
+      context: ../
+      dockerfile: deployment/core.Dockerfile
+    container_name: permia_core
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=postgres
+      - APP_ENV=production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - permia_network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.core-api.rule=PathPrefix(`/api/v1`)"
+      - "traefik.http.routers.core-api.entrypoints=web"
+      - "traefik.http.services.core-api.loadbalancer.server.port=8080"
+      - "traefik.http.routers.core-api.priority=100"
+  bot-service:
+    build:
+      context: ../
+      dockerfile: deployment/bot.Dockerfile
+    container_name: permia_bot
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - CORE_API_URL=http://core-service:8080/api/v1
+      - APP_ENV=production
+      - HTTP_PROXY=
+      - HTTPS_PROXY=
+      - NO_PROXY=core-service,localhost,127.0.0.1
+    depends_on:
+      - core-service
+    networks:
+      - permia_network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.bot-api.rule=PathPrefix(`/api/v1/bot`)"
+      - "traefik.http.routers.bot-api.entrypoints=web"
+      - "traefik.http.services.bot-api.loadbalancer.server.port=8081"
+      - "traefik.http.routers.bot-api.priority=200"
+
+  # --- API Gateway (Reverse Proxy with Routing) ---
+  api-gateway:
+    build:
+      context: ../
+      dockerfile: deployment/gateway.Dockerfile
+    container_name: permia_gateway
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - GATEWAY_PORT=8000
+      - APP_ENV=production
+      - CORE_API_URL=http://core-service:8080/api/v1
+      - BOT_API_URL=http://bot-service:8081/api/v1
+      - LOG_LEVEL=info
+      - ALLOW_ORIGINS=*
+    depends_on:
+      - core-service
+      - bot-service
+    networks:
+      - permia_network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.gateway.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.gateway.entrypoints=web"
+      - "traefik.http.services.gateway.loadbalancer.server.port=8000"
+      - "traefik.http.routers.gateway.priority=10"
+      - "traefik.http.middlewares.gateway-cors.headers.accesscontrolallowmethods=GET,POST,PUT,DELETE,PATCH,OPTIONS"
+      - "traefik.http.middlewares.gateway-cors.headers.accesscontrolallowheaders=Content-Type,Authorization,X-Admin-Token"
+      - "traefik.http.middlewares.gateway-cors.headers.accesscontrolalloworiginlist=*"
+      - "traefik.http.routers.gateway.middlewares=gateway-cors@docker"
+
+  # --- ✅ سرویس جدید: pgAdmin ---
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: permia_pgadmin
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+    networks:
+      - permia_network
+    depends_on:
+      - postgres
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.pgadmin.rule=PathPrefix(`/pgadmin`)"
+      - "traefik.http.routers.pgadmin.entrypoints=web"
+      - "traefik.http.services.pgadmin.loadbalancer.server.port=80"
+      - "traefik.http.routers.pgadmin.priority=300"
+
+volumes:
+  pg_data:
+
+networks:
+  permia_network:
+    driver: bridge

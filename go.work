@@ -1,0 +1,8 @@
+go 1.25.1
+
+use (
+    ./services/core-service
+    ./services/bot-service
+    ./services/api-gateway
+    ./pkg  
+)
