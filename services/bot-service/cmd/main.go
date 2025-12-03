@@ -77,9 +77,10 @@ func main() {
 // registerCallbackHandler registers callback query handlers (inline buttons)
 func registerCallbackHandler(bot *telebot.Bot, menuHandler *menus.Handler, sessionRepo repository.SessionRepository, logger *zap.SugaredLogger) {
 	bot.Handle(telebot.OnCallback, func(c telebot.Context) error {
-		data := c.Data()
+		// FIX: Trim spaces to avoid mismatch issues
+		data := strings.TrimSpace(c.Data())
 		userID := c.Sender().ID
-		logger.Debugf("Received callback from %d: %s", userID, data)
+		logger.Debugf("Received callback from %d: '%s'", userID, data)
 
 		// Acknowledge the callback
 		defer c.Respond()
@@ -122,15 +123,19 @@ func registerCallbackHandler(bot *telebot.Bot, menuHandler *menus.Handler, sessi
 		// Handle product selection via callback
 		if strings.HasPrefix(data, "product:") {
 			// Parse product data
-			productData := strings.Split(strings.TrimPrefix(data, "product:"), "|")
+			cleanData := strings.TrimPrefix(data, "product:")
+			productData := strings.Split(cleanData, "|")
+			
+			// FIX: Added return logic for both success and error cases to prevent fall-through
 			if len(productData) >= 2 {
 				productTitle := productData[0]
 				price, err := strconv.ParseFloat(productData[1], 64)
 				if err != nil {
-					return c.Send("❌ خطا در پردازش محصول.")
+					return c.Send("❌ خطا در پردازش قیمت محصول.")
 				}
 				return menuHandler.ProcessProductOrder(c, productTitle, price)
 			}
+			return c.Send("❌ اطلاعات محصول نامعتبر است.")
 		}
 
 		// Default response for unhandled callbacks
@@ -142,9 +147,10 @@ func registerCallbackHandler(bot *telebot.Bot, menuHandler *menus.Handler, sessi
 func registerMessageHandlers(bot *telebot.Bot, menuHandler *menus.Handler, sessionRepo repository.SessionRepository, logger *zap.SugaredLogger) {
 	// Handle text messages
 	bot.Handle(telebot.OnText, func(c telebot.Context) error {
-		text := c.Text()
+		// FIX: Trim spaces from input text
+		text := strings.TrimSpace(c.Text())
 		userID := c.Sender().ID
-		logger.Debugf("Received text from %d: %s", userID, text)
+		logger.Debugf("Received text from %d: '%s'", userID, text)
 
 		// Get current user state
 		state := sessionRepo.GetState(userID)
@@ -152,7 +158,7 @@ func registerMessageHandlers(bot *telebot.Bot, menuHandler *menus.Handler, sessi
 		// Handle state-specific inputs first
 		if state == domain.StateWaitingForAmount {
 			// User is expected to enter an amount
-			amount, err := strconv.ParseFloat(strings.TrimSpace(text), 64)
+			amount, err := strconv.ParseFloat(text, 64)
 			if err != nil || amount <= 0 {
 				return c.Send("❌ مقدار نامعتبر است. لطفا عدد معتبر وارد کنید.")
 			}
