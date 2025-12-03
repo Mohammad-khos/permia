@@ -64,10 +64,10 @@ func main() {
 	h := handler.New(bot, commandHandler, menuHandler)
 	h.Register()
 
-	// Register callback query handler BEFORE starting bot
+	// Register callback query handler
 	registerCallbackHandler(bot, menuHandler, sessionRepo, sugar)
 
-	// Register text message handlers for interactive flows
+	// Register text message handlers
 	registerMessageHandlers(bot, menuHandler, sessionRepo, sugar)
 
 	sugar.Info("🤖 Bot is starting...")
@@ -103,10 +103,8 @@ func registerCallbackHandler(bot *telebot.Bot, menuHandler *menus.Handler, sessi
 			sessionRepo.SetState(userID, domain.StateWaitingForAmount)
 			return menuHandler.ChargeWallet(c)
 		}
-		if strings.HasPrefix(data, "category:") {
-			category := strings.TrimPrefix(data, "category:")
-			return menuHandler.ShowProducts(c, category)
-		}
+		
+		// برای محصولاتی که از لیست اینلاین انتخاب می‌شوند
 		if strings.HasPrefix(data, "product:") {
 			cleanData := strings.TrimPrefix(data, "product:")
 			productData := strings.Split(cleanData, "|")
@@ -121,7 +119,7 @@ func registerCallbackHandler(bot *telebot.Bot, menuHandler *menus.Handler, sessi
 			return c.Send("❌ اطلاعات محصول نامعتبر است.")
 		}
 
-		// New: Handle subscription details
+		// Handle subscription details
 		if strings.HasPrefix(data, "sub:") {
 			idStr := strings.TrimPrefix(data, "sub:")
 			id, err := strconv.ParseInt(idStr, 10, 64)
@@ -137,11 +135,13 @@ func registerCallbackHandler(bot *telebot.Bot, menuHandler *menus.Handler, sessi
 func registerMessageHandlers(bot *telebot.Bot, menuHandler *menus.Handler, sessionRepo repository.SessionRepository, logger *zap.SugaredLogger) {
 	bot.Handle(telebot.OnText, func(c telebot.Context) error {
 		text := strings.TrimSpace(c.Text())
+		textLower := strings.ToLower(text)
 		userID := c.Sender().ID
 		logger.Debugf("Received text from %d: '%s'", userID, text)
 
 		state := sessionRepo.GetState(userID)
 
+		// State-based handlers
 		if state == domain.StateWaitingForAmount {
 			amount, err := strconv.ParseFloat(text, 64)
 			if err != nil || amount <= 0 {
@@ -151,6 +151,7 @@ func registerMessageHandlers(bot *telebot.Bot, menuHandler *menus.Handler, sessi
 			return menuHandler.ProcessChargeAmount(c, text)
 		}
 
+		// Static Menu Buttons
 		if text == "🛒 خرید اشتراک" {
 			sessionRepo.SetState(userID, domain.StateNone)
 			return menuHandler.Buy(c)
@@ -175,11 +176,24 @@ func registerMessageHandlers(bot *telebot.Bot, menuHandler *menus.Handler, sessi
 			sessionRepo.SetState(userID, domain.StateWaitingForAmount)
 			return menuHandler.ChargeWallet(c)
 		}
-		if len(text) > 2 && text[0:2] == "📂" {
+
+		// Dynamic Category Handler (New Logic)
+		// چک می‌کنیم آیا متن پیام حاوی نام دسته‌ها هست یا خیر
+		// چون دکمه‌ها شامل آیکون هستند (مثل "🤖 chatgpt")، باید با contains چک کنیم
+		if strings.Contains(textLower, "chatgpt") || 
+		   strings.Contains(textLower, "claude") || 
+		   strings.Contains(textLower, "gemini") || 
+		   strings.Contains(textLower, "tools") || 
+		   strings.Contains(text, "📂") { // برای دسته‌های متفرقه که آیکون پوشه دارند
+			
 			sessionRepo.SetState(userID, domain.StateNone)
-			category := strings.TrimPrefix(text, "📂 ")
+			
+			// استخراج نام تمیز دسته از متن دکمه
+			category := cleanCategoryName(text)
 			return menuHandler.ShowProducts(c, category)
 		}
+
+		// Fallback for Product Selection (Text Mode) - if needed
 		if strings.Contains(text, " - ") && strings.HasSuffix(text, " T") {
 			sessionRepo.SetState(userID, domain.StateNone)
 			return menuHandler.ProcessProductOrder(c, text, 0)
@@ -189,4 +203,15 @@ func registerMessageHandlers(bot *telebot.Bot, menuHandler *menus.Handler, sessi
 			ReplyMarkup: menus.MainMenuMarkup,
 		})
 	})
+}
+
+// تابع کمکی برای پاک کردن آیکون از نام دسته
+func cleanCategoryName(text string) string {
+	// لیست تمام آیکون‌های استفاده شده
+	icons := []string{"🤖", "🧠", "✨", "🛠", "📂"}
+	clean := text
+	for _, icon := range icons {
+		clean = strings.ReplaceAll(clean, icon, "")
+	}
+	return strings.TrimSpace(clean)
 }

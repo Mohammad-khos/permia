@@ -73,6 +73,7 @@ func (h *Handler) MainMenu(c telebot.Context) error {
 	})
 }
 
+// Buy Flow - Shows categories with Main Keyboard Buttons
 func (h *Handler) Buy(c telebot.Context) error {
 	h.logger.Infof("User %d viewing buy menu", c.Sender().ID)
 
@@ -86,44 +87,114 @@ func (h *Handler) Buy(c telebot.Context) error {
 		return c.Send("📭 در حال حاضر محصولی موجود نیست.")
 	}
 
+	// Extract unique categories
 	categories := make(map[string]bool)
 	for _, p := range products {
 		categories[p.Category] = true
 	}
 
+	// Create category buttons (Main Keyboard)
 	categoryMarkup := &telebot.ReplyMarkup{ResizeKeyboard: true}
 	var catRows []telebot.Row
-	inlineCategoryMarkup := &telebot.ReplyMarkup{ResizeKeyboard: true}
-	var inlineCatRows []telebot.Row
+	var tempRow []telebot.Btn
 
 	for cat := range categories {
-		btn := categoryMarkup.Text(fmt.Sprintf("📁 %s", cat))
-		catRows = append(catRows, categoryMarkup.Row(btn))
+		icon := getCategoryIcon(cat)
+		// Text: "🤖 chatgpt"
+		btn := categoryMarkup.Text(fmt.Sprintf("%s %s", icon, cat))
+		tempRow = append(tempRow, btn)
 
-		inlineBtn := inlineCategoryMarkup.Data(fmt.Sprintf("📁 %s", cat), fmt.Sprintf("category:%s", cat))
-		inlineCatRows = append(inlineCatRows, inlineCategoryMarkup.Row(inlineBtn))
+		// چیدمان ۲ تایی دکمه‌ها
+		if len(tempRow) == 2 {
+			catRows = append(catRows, categoryMarkup.Row(tempRow...))
+			tempRow = []telebot.Btn{}
+		}
+	}
+	// اگر دکمه‌ای باقی مانده بود
+	if len(tempRow) > 0 {
+		catRows = append(catRows, categoryMarkup.Row(tempRow...))
 	}
 
+	// Add back button
 	catRows = append(catRows, categoryMarkup.Row(BtnBackToMain))
-	inlineCatRows = append(inlineCatRows, inlineCategoryMarkup.Row(inlineCategoryMarkup.Data("🔙 بازگشت به منوی اصلی", "main_menu")))
 
 	categoryMarkup.Reply(catRows...)
-	inlineCategoryMarkup.Inline(inlineCatRows...)
 
 	msg := "🛍️ <b>دسته‌ای را انتخاب کنید:</b>"
 
 	return c.Send(msg, &telebot.SendOptions{
 		ParseMode:   telebot.ModeHTML,
-		ReplyMarkup: inlineCategoryMarkup,
+		ReplyMarkup: categoryMarkup, // استفاده از کیبورد اصلی
 	})
 }
 
-// Profile shows user information (Static Info + Real Balance)
+// ShowProducts shows products in a selected category
+func (h *Handler) ShowProducts(c telebot.Context, category string) error {
+	products, err := h.botService.GetProducts()
+	if err != nil {
+		return c.Send("❌ بارگذاری محصولات ناموفق بود.")
+	}
+
+	var filtered []domain.Product
+	for _, p := range products {
+		if strings.EqualFold(p.Category, category) {
+			filtered = append(filtered, p)
+		}
+	}
+
+	if len(filtered) == 0 {
+		return c.Send("📭 در این دسته محصولی موجود نیست.")
+	}
+
+	var msgBuilder strings.Builder
+	icon := getCategoryIcon(category)
+	msgBuilder.WriteString(fmt.Sprintf("📦 <b>محصولات دسته %s %s:</b>\n\n", icon, h.escapeHTML(category)))
+
+	inlineProductsMarkup := &telebot.ReplyMarkup{ResizeKeyboard: true}
+	var inlineProdRows []telebot.Row
+
+	for i, p := range filtered {
+		// اولویت نمایش: نام محصول -> شناسه فنی -> پیش‌فرض
+		displayName := p.Name
+		if displayName == "" {
+			displayName = p.SKU
+		}
+		if displayName == "" {
+			displayName = fmt.Sprintf("محصول %d", p.ID)
+		}
+
+		// افزودن به لیست متنی پیام
+		msgBuilder.WriteString(fmt.Sprintf("%d. <b>%s</b>\n💰 قیمت: %.0f تومان\n\n", i+1, h.escapeHTML(displayName), p.Price))
+
+		// افزودن دکمه شیشه‌ای خرید
+		btnText := fmt.Sprintf("%s | %.0f T", displayName, p.Price)
+		// ارسال نام محصول در کال‌بک برای نمایش در مرحله بعد
+		callbackData := fmt.Sprintf("product:%s|%.0f", p.Name, p.Price) 
+		
+		inlineBtn := inlineProductsMarkup.Data(btnText, callbackData)
+		inlineProdRows = append(inlineProdRows, inlineProductsMarkup.Row(inlineBtn))
+	}
+
+	msgBuilder.WriteString("👇 <b>لطفا جهت خرید، یکی از گزینه‌های زیر را انتخاب کنید:</b>")
+
+	btnBack := inlineProductsMarkup.Data("🔙 بازگشت به منوی اصلی", "main_menu")
+	inlineProdRows = append(inlineProdRows, inlineProductsMarkup.Row(btnBack))
+
+	inlineProductsMarkup.Inline(inlineProdRows...)
+
+	return c.Send(msgBuilder.String(), &telebot.SendOptions{
+		ParseMode:   telebot.ModeHTML,
+		ReplyMarkup: inlineProductsMarkup,
+	})
+}
+
+// ... (بقیه توابع پایین فایل بدون تغییر)
+
+// Profile shows user information
 func (h *Handler) Profile(c telebot.Context) error {
 	userID := c.Sender().ID
 	h.logger.Infof("User %d viewing profile", userID)
 
-	// دریافت موجودی واقعی از Core
 	user, err := h.botService.GetProfile(c)
 	if err != nil {
 		return c.Send("❌ بارگذاری پروفایل ناموفق بود.")
@@ -134,13 +205,11 @@ func (h *Handler) Profile(c telebot.Context) error {
 		h.logger.Errorf("Failed to get subs: %v", err)
 	}
 
-	// ✅ تغییرات اینجا اعمال شد:
-	// استفاده از دیتای استاتیک (ثابت) اما مفید به جای ID و تاریخ عضویت
 	msg := fmt.Sprintf(
 		"👤 <b>پروفایل شما</b>\n\n"+
-			"🔰 <b>وضعیت حساب:</b> ✅ تایید شده\n"+ // استاتیک
-			"⭐️ <b>سطح کاربری:</b> ویژه (VIP)\n"+ // استاتیک (حس خوب به کاربر)
-			"💰 <b>موجودی:</b> %.0f تومان\n\n"+ // دینامیک (واقعی)
+			"🔰 <b>وضعیت حساب:</b> ✅ تایید شده\n"+
+			"⭐️ <b>سطح کاربری:</b> ویژه (VIP)\n"+
+			"💰 <b>موجودی:</b> %.0f تومان\n\n"+
 			"👇 <b>لیست اشتراک‌های شما:</b>",
 		user.Balance,
 	)
@@ -167,6 +236,7 @@ func (h *Handler) Profile(c telebot.Context) error {
 	})
 }
 
+// ShowSubscriptionDetail implements the interface method
 func (h *Handler) ShowSubscriptionDetail(c telebot.Context, subID int64) error {
 	subs, err := h.botService.GetUserSubscriptions(c.Sender().ID)
 	if err != nil {
@@ -185,7 +255,6 @@ func (h *Handler) ShowSubscriptionDetail(c telebot.Context, subID int64) error {
 		return c.Send("❌ اشتراک یافت نشد.")
 	}
 
-	// Simple pass-through for dates
 	convertToJalali := func(d string) string { return d }
 
 	detailMsg := fmt.Sprintf(
@@ -256,50 +325,6 @@ func (h *Handler) Support(c telebot.Context) error {
 	return c.Send(supportMsg, &telebot.SendOptions{
 		ParseMode:   telebot.ModeHTML,
 		ReplyMarkup: inlineBackMarkup,
-	})
-}
-
-func (h *Handler) ShowProducts(c telebot.Context, category string) error {
-	products, err := h.botService.GetProducts()
-	if err != nil {
-		return c.Send("❌ بارگذاری محصولات ناموفق بود.")
-	}
-
-	var filtered []domain.Product
-	for _, p := range products {
-		if p.Category == category {
-			filtered = append(filtered, p)
-		}
-	}
-
-	if len(filtered) == 0 {
-		return c.Send("📭 در این دسته محصولی موجود نیست.")
-	}
-
-	productsMarkup := &telebot.ReplyMarkup{ResizeKeyboard: true}
-	var prodRows []telebot.Row
-	inlineProductsMarkup := &telebot.ReplyMarkup{ResizeKeyboard: true}
-	var inlineProdRows []telebot.Row
-
-	for _, p := range filtered {
-		btn := productsMarkup.Text(fmt.Sprintf("%s - %.0f T", p.Name, p.Price))
-		prodRows = append(prodRows, productsMarkup.Row(btn))
-
-		inlineBtn := inlineProductsMarkup.Data(fmt.Sprintf("%s - %.0f T", p.Name, p.Price), fmt.Sprintf("product:%s|%.0f", p.Name, p.Price))
-		inlineProdRows = append(inlineProdRows, inlineProductsMarkup.Row(inlineBtn))
-	}
-
-	prodRows = append(prodRows, productsMarkup.Row(BtnBackToMain))
-	inlineProdRows = append(inlineProdRows, inlineProductsMarkup.Row(inlineProductsMarkup.Data("🔙 بازگشت به منوی اصلی", "main_menu")))
-
-	productsMarkup.Reply(prodRows...)
-	inlineProductsMarkup.Inline(inlineProdRows...)
-
-	msg := fmt.Sprintf("📦 <b>%s</b>\n\nبرای خرید یک محصول انتخاب کنید:", h.escapeHTML(category))
-
-	return c.Send(msg, &telebot.SendOptions{
-		ParseMode:   telebot.ModeHTML,
-		ReplyMarkup: inlineProductsMarkup,
 	})
 }
 
@@ -407,9 +432,32 @@ func (h *Handler) escapeHTML(s string) string {
 }
 
 func extractSKU(title string) string {
-	parts := strings.Split(title, " - ")
+	parts := strings.Split(title, " | ") // Updated split delimiter
+	if len(parts) > 0 {
+		return strings.ToLower(strings.ReplaceAll(parts[0], " ", "-"))
+	}
+	// Fallback to old format
+	parts = strings.Split(title, " - ")
 	if len(parts) > 0 {
 		return strings.ToLower(strings.ReplaceAll(parts[0], " ", "-"))
 	}
 	return "unknown"
+}
+
+// تابع کمکی برای آیکون‌ها
+func getCategoryIcon(cat string) string {
+	catLower := strings.ToLower(cat)
+	if strings.Contains(catLower, "chatgpt") || strings.Contains(catLower, "gpt") {
+		return "🤖"
+	}
+	if strings.Contains(catLower, "claude") {
+		return "🧠"
+	}
+	if strings.Contains(catLower, "gemini") {
+		return "✨"
+	}
+	if strings.Contains(catLower, "tools") || strings.Contains(catLower, "ابزار") {
+		return "🛠"
+	}
+	return "📁"
 }
