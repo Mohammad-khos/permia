@@ -133,10 +133,15 @@ func (c *Client) CreateOrder(userID uint, telegramID int64, sku string) (*Create
 		SKU:        sku,
 	}
 
-	var result CreateOrderResponse
+	// ✅ تغییر مهم: استفاده از ساختار لفاف‌پیچی شده (Wrapper)
+	// سرور پاسخ را به صورت { "success": true, "data": { ... } } می‌فرستد
+	var response struct {
+		Data CreateOrderResponse `json:"data"`
+	}
+
 	resp, err := c.resty.R().
 		SetBody(payload).
-		SetResult(&result).
+		SetResult(&response). // خواندن پاسخ داخل این ساختار
 		Post("/orders")
 
 	if err != nil {
@@ -144,17 +149,16 @@ func (c *Client) CreateOrder(userID uint, telegramID int64, sku string) (*Create
 		return nil, fmt.Errorf("core service is unavailable")
 	}
 	
-	// بررسی دقیق‌تر خطا
 	if resp.IsError() {
 		c.logger.Errorf("Core CreateOrder error body: %s", resp.String())
 		if resp.StatusCode() == 400 && contains(resp.String(), "insufficient") {
 			return nil, fmt.Errorf("insufficient funds")
 		}
-		// برگرداندن متن خطا برای دیباگ بهتر
 		return nil, fmt.Errorf("failed to create order: %s", resp.String())
 	}
 
-	return &result, nil
+	// برگرداندن دیتای واقعی که از داخل پاکت درآوردیم
+	return &response.Data, nil
 }
 
 // GetUserSubscriptions دریافت لیست اشتراک‌ها

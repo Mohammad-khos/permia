@@ -58,6 +58,7 @@ func (h *OrderHandler) CreateOrder(c *gin.Context) {
 		// اگر فقط تلگرام آیدی داشتیم، کاربر را پیدا یا ایجاد می‌کنیم
 		user, err := h.userSvc.GetOrCreateUser(c, req.TelegramID, "", "", "")
 		if err != nil {
+			c.Error(err)
 			response.ServerError(c, err)
 			return
 		}

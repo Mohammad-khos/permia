@@ -7,7 +7,7 @@ CREATE TABLE "users" (
   "last_name" varchar(100),
   "wallet_balance" decimal(15, 0) DEFAULT 0,
   "total_spent" decimal(15, 0) DEFAULT 0,
-  "referral_code" varchar(20) UNIQUE,
+  "referral_code" varchar(100) UNIQUE,
   "referred_by" bigint,
   "total_referrals" int DEFAULT 0,
   "is_banned" boolean DEFAULT false,

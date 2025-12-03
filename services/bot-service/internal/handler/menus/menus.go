@@ -157,8 +157,7 @@ func (h *Handler) ShowProducts(c telebot.Context, category string) error {
 
 		btnText := fmt.Sprintf("%s | %.0f T", displayName, p.Price)
 		
-		// ✅ تغییر حیاتی: استفاده از p.SKU به جای p.Name
-		// این خط باعث می‌شود شناسه درست به سرور ارسال شود
+		// ارسال SKU واقعی محصول در کالبک
 		callbackData := fmt.Sprintf("product:%s|%.0f", p.SKU, p.Price)
 		
 		inlineBtn := inlineProductsMarkup.Data(btnText, callbackData)
@@ -189,8 +188,7 @@ func (h *Handler) ProcessProductOrder(c telebot.Context, productSKU string, pric
 		dbUserID = user.ID
 	}
 
-	// ✅ تغییر حیاتی: حذف extractSKU
-	// چون دکمه‌ها الان SKU واقعی را می‌فرستند، نیازی به تبدیل نام به SKU نیست.
+	// استفاده مستقیم از SKU دریافتی
 	sku := productSKU
 
 	order, err := h.coreClient.CreateOrder(dbUserID, telegramID, sku)
@@ -213,7 +211,6 @@ func (h *Handler) ProcessProductOrder(c telebot.Context, productSKU string, pric
 			})
 		}
 
-		// نمایش خطای عمومی
 		return c.Send("❌ ثبت سفارش ناموفق بود. لطفا با پشتیبانی تماس بگیرید.")
 	}
 
@@ -237,8 +234,6 @@ func (h *Handler) ProcessProductOrder(c telebot.Context, productSKU string, pric
 		ReplyMarkup: successMarkup,
 	})
 }
-
-// ... (بقیه توابع بدون تغییر)
 
 func (h *Handler) Profile(c telebot.Context) error {
 	userID := c.Sender().ID
