@@ -161,6 +161,30 @@ func (c *Client) CreateOrder(userID uint, sku string) (*CreateOrderResponse, err
 	return &result, nil
 }
 
+// GetUserSubscriptions دریافت لیست اشتراک‌های کاربر
+func (c *Client) GetUserSubscriptions(telegramID int64) ([]domain.Subscription, error) {
+	var response struct {
+		Data []domain.Subscription `json:"data"` // چون در Core از response.Success استفاده کردیم، دیتا داخل فیلد data است
+	}
+
+	// ارسال درخواست به Core
+	resp, err := c.resty.R().
+		SetHeader("X-Telegram-ID", fmt.Sprintf("%d", telegramID)).
+		SetResult(&response).
+		Get("/users/subscriptions")
+
+	if err != nil {
+		c.logger.Errorf("Error fetching subscriptions: %v", err)
+		return nil, err
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("API error: %s", resp.Status())
+	}
+
+	return response.Data, nil
+}
+
 // ChargeRequest is the payload for initiating a charge
 type ChargeRequest struct {
 	OrderID       uint   `json:"order_id"`

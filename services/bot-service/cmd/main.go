@@ -74,26 +74,19 @@ func main() {
 	bot.Start()
 }
 
-// registerCallbackHandler registers callback query handlers (inline buttons)
 func registerCallbackHandler(bot *telebot.Bot, menuHandler *menus.Handler, sessionRepo repository.SessionRepository, logger *zap.SugaredLogger) {
 	bot.Handle(telebot.OnCallback, func(c telebot.Context) error {
-		// FIX: Trim spaces to avoid mismatch issues
 		data := strings.TrimSpace(c.Data())
 		userID := c.Sender().ID
 		logger.Debugf("Received callback from %d: '%s'", userID, data)
 
-		// Acknowledge the callback
 		defer c.Respond()
 
-		// Reset state for all callback queries (navigation)
 		sessionRepo.SetState(userID, domain.StateNone)
 
-		// Handle main menu callback
 		if data == "main_menu" {
 			return menuHandler.MainMenu(c)
 		}
-
-		// Handle main menu buttons
 		if data == "buy" {
 			return menuHandler.Buy(c)
 		}
@@ -106,27 +99,17 @@ func registerCallbackHandler(bot *telebot.Bot, menuHandler *menus.Handler, sessi
 		if data == "support" {
 			return menuHandler.Support(c)
 		}
-
-		// Handle wallet charge button
 		if data == "charge_wallet" {
-			// Set state to waiting for amount
 			sessionRepo.SetState(userID, domain.StateWaitingForAmount)
 			return menuHandler.ChargeWallet(c)
 		}
-
-		// Handle category selection via callback
 		if strings.HasPrefix(data, "category:") {
 			category := strings.TrimPrefix(data, "category:")
 			return menuHandler.ShowProducts(c, category)
 		}
-
-		// Handle product selection via callback
 		if strings.HasPrefix(data, "product:") {
-			// Parse product data
 			cleanData := strings.TrimPrefix(data, "product:")
 			productData := strings.Split(cleanData, "|")
-			
-			// FIX: Added return logic for both success and error cases to prevent fall-through
 			if len(productData) >= 2 {
 				productTitle := productData[0]
 				price, err := strconv.ParseFloat(productData[1], 64)
@@ -138,36 +121,36 @@ func registerCallbackHandler(bot *telebot.Bot, menuHandler *menus.Handler, sessi
 			return c.Send("❌ اطلاعات محصول نامعتبر است.")
 		}
 
-		// Default response for unhandled callbacks
+		// New: Handle subscription details
+		if strings.HasPrefix(data, "sub:") {
+			idStr := strings.TrimPrefix(data, "sub:")
+			id, err := strconv.ParseInt(idStr, 10, 64)
+			if err == nil {
+				return menuHandler.ShowSubscriptionDetail(c, id)
+			}
+		}
+
 		return c.Send("❓ متوجه نشدم. لطفا از دکمه‌های منو استفاده کنید.")
 	})
 }
 
-// registerMessageHandlers registers text message handlers for interactive bot flows
 func registerMessageHandlers(bot *telebot.Bot, menuHandler *menus.Handler, sessionRepo repository.SessionRepository, logger *zap.SugaredLogger) {
-	// Handle text messages
 	bot.Handle(telebot.OnText, func(c telebot.Context) error {
-		// FIX: Trim spaces from input text
 		text := strings.TrimSpace(c.Text())
 		userID := c.Sender().ID
 		logger.Debugf("Received text from %d: '%s'", userID, text)
 
-		// Get current user state
 		state := sessionRepo.GetState(userID)
 
-		// Handle state-specific inputs first
 		if state == domain.StateWaitingForAmount {
-			// User is expected to enter an amount
 			amount, err := strconv.ParseFloat(text, 64)
 			if err != nil || amount <= 0 {
 				return c.Send("❌ مقدار نامعتبر است. لطفا عدد معتبر وارد کنید.")
 			}
-			// Reset state after processing
 			sessionRepo.SetState(userID, domain.StateNone)
 			return menuHandler.ProcessChargeAmount(c, text)
 		}
 
-		// Handle main menu buttons (these should reset state)
 		if text == "🛒 خرید اشتراک" {
 			sessionRepo.SetState(userID, domain.StateNone)
 			return menuHandler.Buy(c)
@@ -189,28 +172,19 @@ func registerMessageHandlers(bot *telebot.Bot, menuHandler *menus.Handler, sessi
 			return menuHandler.MainMenu(c)
 		}
 		if text == "➕ شارژ کیف پول" {
-			// Set state to waiting for amount
 			sessionRepo.SetState(userID, domain.StateWaitingForAmount)
 			return menuHandler.ChargeWallet(c)
 		}
-
-		// Handle category selection (text version)
 		if len(text) > 2 && text[0:2] == "📂" {
 			sessionRepo.SetState(userID, domain.StateNone)
 			category := strings.TrimPrefix(text, "📂 ")
 			return menuHandler.ShowProducts(c, category)
 		}
-
-		// Handle product purchase (text version)
-		// Check if it looks like a product selection (contains price indicator)
 		if strings.Contains(text, " - ") && strings.HasSuffix(text, " T") {
 			sessionRepo.SetState(userID, domain.StateNone)
-			// Extract product name and price
-			logger.Infof("User %d selecting product: %s", userID, text)
 			return menuHandler.ProcessProductOrder(c, text, 0)
 		}
 
-		// Default response for unhandled text
 		return c.Send("❓ متوجه نشدم. لطفا از دکمه‌های منو استفاده کنید.", &telebot.SendOptions{
 			ReplyMarkup: menus.MainMenuMarkup,
 		})

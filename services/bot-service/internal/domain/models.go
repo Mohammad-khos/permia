@@ -30,6 +30,17 @@ type Order struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// Subscription ساختار اطلاعات اشتراک دریافتی از Core Service
+type Subscription struct {
+	ID            int64   `json:"id"`
+	ProductName   string  `json:"ProductName"`   // نام محصول
+	Sku           string  `json:"sku"`           // کد محصول
+	DeliveredData string  `json:"DeliveredData"` // اطلاعات تحویل (یوزر/پسورد)
+	Amount        float64 `json:"amount"`
+	CreatedAt     string  `json:"CreatedAt"`     // تاریخ ایجاد (رشته)
+	ExpiresAt     string  `json:"ExpiresAt"`     // تاریخ انقضا (رشته)
+}
+
 // UserState represents the state of a user in a conversation.
 type UserState int
 

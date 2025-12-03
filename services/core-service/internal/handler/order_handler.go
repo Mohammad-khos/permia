@@ -13,6 +13,17 @@ type OrderHandler struct {
 	userSvc  *service.UserService // برای چک کردن یوزر قبل از خرید
 }
 
+// SubscriptionResponse ساختار پاسخ سفارش اشتراک
+type SubscriptionResponse struct {
+	ID            uint    `json:"id"`
+	ProductName   string  `json:"ProductName"`
+	Sku           string  `json:"sku"`
+	DeliveredData string  `json:"DeliveredData"`
+	Amount        float64 `json:"amount"`
+	CreatedAt     string  `json:"CreatedAt"`
+	ExpiresAt     string  `json:"ExpiresAt"` // فیلد محاسبه شده
+}
+
 func NewOrderHandler(orderSvc *service.OrderService, userSvc *service.UserService) *OrderHandler {
 	return &OrderHandler{
 		orderSvc: orderSvc,
@@ -81,4 +92,47 @@ func (h *OrderHandler) GetOrderByID(c *gin.Context) {
 	}
 
 	response.Success(c, order, "Order retrieved successfully")
+}
+
+// GetUserSubscriptions دریافت سفارشات اشتراک کاربر بر اساس تلگرام آیدی
+// GET /api/v1/users/subscriptions
+func (h *OrderHandler) GetUserSubscriptions(c *gin.Context) {
+	// دریافت شناسه تلگرام از هدر (که بات ارسال می‌کند)
+	telegramIDStr := c.GetHeader("X-Telegram-ID")
+	if telegramIDStr == "" {
+		response.Error(c, 400, "X-Telegram-ID header is required")
+		return
+	}
+
+	telegramID, _ := strconv.ParseInt(telegramIDStr, 10, 64)
+
+	orders, err := h.orderSvc.GetUserSubscriptions(c, telegramID)
+	if err != nil {
+		response.Error(c, 404, "User or orders not found")
+		return
+	}
+
+	// تبدیل داده‌های دیتابیس به فرمت پاسخ API
+	var result []SubscriptionResponse
+	for _, o := range orders {
+		// محاسبه تاریخ انقضا (فرض بر ۳۰ روزه بودن)
+		days := 30
+		expiryTime := o.CreatedAt.AddDate(0, 0, days)
+
+		result = append(result, SubscriptionResponse{
+			ID:            o.ID,
+            // اصلاح ۱: استفاده از Title به جای Name
+			ProductName:   o.Product.Title, 
+            
+            // اصلاح ۲: دسترسی به SKU از طریق آبجکت Product
+			Sku:           o.Product.SKU,   
+            
+			DeliveredData: o.DeliveredData,
+			Amount:        o.Amount,
+			CreatedAt:     o.CreatedAt.Format("2006-01-02"),
+			ExpiresAt:     expiryTime.Format("2006-01-02"),
+		})
+	}
+
+	response.Success(c, result, "User subscriptions retrieved")
 }

@@ -145,3 +145,15 @@ func (s *OrderService) GetAllOrders(ctx context.Context) ([]domain.Order, error)
 func (s *OrderService) GetOrderByID(ctx context.Context, id uint) (*domain.Order, error) {
 	return s.orderRepo.GetByID(ctx, id)
 }
+
+// GetUserSubscriptions بازیابی سفارشات کاربر بر اساس تلگرام آیدی
+func (s *OrderService) GetUserSubscriptions(ctx context.Context, telegramID int64) ([]domain.Order, error) {
+    // 1. پیدا کردن کاربر از روی تلگرام آیدی
+    user, err := s.userRepo.GetByTelegramID(ctx, telegramID)
+    if err != nil {
+        return nil, err // کاربر پیدا نشد
+    }
+
+    // 2. دریافت تاریخچه سفارشات
+    return s.orderRepo.GetHistoryByUserID(ctx, user.ID)
+}

@@ -127,22 +127,33 @@ services:
 
   # --- ✅ سرویس جدید: pgAdmin ---
   pgadmin:
-    image: dpage/pgadmin4
-    container_name: permia_pgadmin
-    restart: always
-    environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
-    networks:
-      - permia_network
-    depends_on:
-      - postgres
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.pgadmin.rule=PathPrefix(`/pgadmin`)"
-      - "traefik.http.routers.pgadmin.entrypoints=web"
-      - "traefik.http.services.pgadmin.loadbalancer.server.port=80"
-      - "traefik.http.routers.pgadmin.priority=300"
+      image: dpage/pgadmin4
+      container_name: permia_pgadmin
+      restart: always
+      environment:
+        PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
+        PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+        # نکته: pgAdmin برای فهمیدن هدر X-Script-Name نیاز به کانفیگ خاصی ندارد، خودکار آن را می‌خواند.
+      networks:
+        - permia_network
+      depends_on:
+        - postgres
+      labels:
+        - "traefik.enable=true"
+        # روتینگ:
+        - "traefik.http.routers.pgadmin.rule=PathPrefix(`/pgadmin`)"
+        - "traefik.http.routers.pgadmin.entrypoints=web"
+        - "traefik.http.routers.pgadmin.priority=300"
+        - "traefik.http.services.pgadmin.loadbalancer.server.port=80"
+        
+        # میدلور ۱: حذف پیشوند /pgadmin از درخواست قبل از ارسال به کانتینر
+        - "traefik.http.middlewares.pgadmin-strip.stripprefix.prefixes=/pgadmin"
+        
+        # میدلور ۲: اضافه کردن هدر برای اینکه pgAdmin بفهمد در ساب-دایرکتوری است
+        - "traefik.http.middlewares.pgadmin-header.headers.customrequestheaders.X-Script-Name=/pgadmin"
+        
+        # اعمال هر دو میدلور به روتر
+        - "traefik.http.routers.pgadmin.middlewares=pgadmin-strip,pgadmin-header"
 
 volumes:
   pg_data:
