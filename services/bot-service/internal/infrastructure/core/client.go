@@ -27,7 +27,11 @@ func NewClient(baseURL string, logger *zap.SugaredLogger) *Client {
 
 // LoginUser calls the core service to log in or register a user.
 func (c *Client) LoginUser(telegramID int64, username, firstName, lastName string) (*domain.User, error) {
-	var user domain.User
+	// ✅ اصلاح شده: استفاده از ساختار لفاف‌پیچی شده (Wrapped) برای دریافت دیتا
+	var result struct {
+		Data domain.User `json:"data"`
+	}
+	
 	payload := map[string]interface{}{
 		"telegram_id": telegramID,
 		"username":    username,
@@ -37,7 +41,7 @@ func (c *Client) LoginUser(telegramID int64, username, firstName, lastName strin
 
 	resp, err := c.resty.R().
 		SetBody(payload).
-		SetResult(&user).
+		SetResult(&result). // خواندن داخل ساختار result
 		Post("/users/auth")
 
 	if err != nil {
@@ -49,8 +53,9 @@ func (c *Client) LoginUser(telegramID int64, username, firstName, lastName strin
 		return nil, fmt.Errorf("failed to login user, status: %s", resp.Status())
 	}
 
-	return &user, nil
+	return &result.Data, nil // بازگرداندن دیتای واقعی
 }
+
 
 // GetProfile calls the core service to get a user's profile.
 func (c *Client) GetProfile(telegramID int64) (*domain.User, error) {

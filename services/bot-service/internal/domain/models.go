@@ -7,7 +7,7 @@ type User struct {
 	ID         uint      `json:"id"`
 	TelegramID int64     `json:"telegram_id"`
 	Username   string    `json:"username"`
-	Balance    float64   `json:"balance"`
+	Balance    float64   `json:"wallet_balance"`
 	CreatedAt  time.Time `json:"created_at"`
 }
 

@@ -53,3 +53,21 @@ func (h *UserHandler) GetBalance(c *gin.Context) {
 
 	response.Success(c, map[string]float64{"balance": balance}, "Balance retrieved")
 }
+
+// GetUserByTelegramID دریافت اطلاعات کاربر با تلگرام آیدی
+func (h *UserHandler) GetUserByTelegramID(c *gin.Context) {
+	telegramIDStr := c.Param("telegram_id")
+	telegramID, err := strconv.ParseInt(telegramIDStr, 10, 64)
+	if err != nil {
+		response.Error(c, 400, "Invalid Telegram ID")
+		return
+	}
+
+	user, err := h.userSvc.GetByTelegramID(c, telegramID)
+	if err != nil {
+		response.Error(c, 404, "User not found")
+		return
+	}
+
+	response.Success(c, user, "User profile retrieved")
+}

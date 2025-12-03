@@ -107,6 +107,7 @@ func main() {
 			users.POST("/auth", userHandler.AuthUser)
 			users.GET("/:id/balance", userHandler.GetBalance)
 			users.GET("/subscriptions", orderHandler.GetUserSubscriptions)
+			users.GET("/by-telegram/:telegram_id", userHandler.GetUserByTelegramID)
 		}
 
 		// Product Routes
