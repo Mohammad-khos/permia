@@ -73,7 +73,6 @@ func (h *Handler) MainMenu(c telebot.Context) error {
 	})
 }
 
-// Buy Flow - Shows categories with Main Keyboard Buttons
 func (h *Handler) Buy(c telebot.Context) error {
 	h.logger.Infof("User %d viewing buy menu", c.Sender().ID)
 
@@ -87,48 +86,40 @@ func (h *Handler) Buy(c telebot.Context) error {
 		return c.Send("📭 در حال حاضر محصولی موجود نیست.")
 	}
 
-	// Extract unique categories
 	categories := make(map[string]bool)
 	for _, p := range products {
 		categories[p.Category] = true
 	}
 
-	// Create category buttons (Main Keyboard)
 	categoryMarkup := &telebot.ReplyMarkup{ResizeKeyboard: true}
 	var catRows []telebot.Row
 	var tempRow []telebot.Btn
 
 	for cat := range categories {
 		icon := getCategoryIcon(cat)
-		// Text: "🤖 chatgpt"
 		btn := categoryMarkup.Text(fmt.Sprintf("%s %s", icon, cat))
 		tempRow = append(tempRow, btn)
 
-		// چیدمان ۲ تایی دکمه‌ها
 		if len(tempRow) == 2 {
 			catRows = append(catRows, categoryMarkup.Row(tempRow...))
 			tempRow = []telebot.Btn{}
 		}
 	}
-	// اگر دکمه‌ای باقی مانده بود
 	if len(tempRow) > 0 {
 		catRows = append(catRows, categoryMarkup.Row(tempRow...))
 	}
 
-	// Add back button
 	catRows = append(catRows, categoryMarkup.Row(BtnBackToMain))
-
 	categoryMarkup.Reply(catRows...)
 
 	msg := "🛍️ <b>دسته‌ای را انتخاب کنید:</b>"
 
 	return c.Send(msg, &telebot.SendOptions{
 		ParseMode:   telebot.ModeHTML,
-		ReplyMarkup: categoryMarkup, // استفاده از کیبورد اصلی
+		ReplyMarkup: categoryMarkup,
 	})
 }
 
-// ShowProducts shows products in a selected category
 func (h *Handler) ShowProducts(c telebot.Context, category string) error {
 	products, err := h.botService.GetProducts()
 	if err != nil {
@@ -154,7 +145,6 @@ func (h *Handler) ShowProducts(c telebot.Context, category string) error {
 	var inlineProdRows []telebot.Row
 
 	for i, p := range filtered {
-		// اولویت نمایش: نام محصول -> شناسه فنی -> پیش‌فرض
 		displayName := p.Name
 		if displayName == "" {
 			displayName = p.SKU
@@ -163,13 +153,13 @@ func (h *Handler) ShowProducts(c telebot.Context, category string) error {
 			displayName = fmt.Sprintf("محصول %d", p.ID)
 		}
 
-		// افزودن به لیست متنی پیام
 		msgBuilder.WriteString(fmt.Sprintf("%d. <b>%s</b>\n💰 قیمت: %.0f تومان\n\n", i+1, h.escapeHTML(displayName), p.Price))
 
-		// افزودن دکمه شیشه‌ای خرید
 		btnText := fmt.Sprintf("%s | %.0f T", displayName, p.Price)
-		// ارسال نام محصول در کال‌بک برای نمایش در مرحله بعد
-		callbackData := fmt.Sprintf("product:%s|%.0f", p.Name, p.Price) 
+		
+		// ✅ تغییر حیاتی: استفاده از p.SKU به جای p.Name
+		// این خط باعث می‌شود شناسه درست به سرور ارسال شود
+		callbackData := fmt.Sprintf("product:%s|%.0f", p.SKU, p.Price)
 		
 		inlineBtn := inlineProductsMarkup.Data(btnText, callbackData)
 		inlineProdRows = append(inlineProdRows, inlineProductsMarkup.Row(inlineBtn))
@@ -188,9 +178,68 @@ func (h *Handler) ShowProducts(c telebot.Context, category string) error {
 	})
 }
 
-// ... (بقیه توابع پایین فایل بدون تغییر)
+// ProcessProductOrder handles order creation
+func (h *Handler) ProcessProductOrder(c telebot.Context, productSKU string, price float64) error {
+	telegramID := c.Sender().ID
+	h.logger.Infof("User %d ordering SKU: %s", telegramID, productSKU)
 
-// Profile shows user information
+	user, err := h.botService.GetProfile(c)
+	var dbUserID uint = 0
+	if err == nil && user != nil {
+		dbUserID = user.ID
+	}
+
+	// ✅ تغییر حیاتی: حذف extractSKU
+	// چون دکمه‌ها الان SKU واقعی را می‌فرستند، نیازی به تبدیل نام به SKU نیست.
+	sku := productSKU
+
+	order, err := h.coreClient.CreateOrder(dbUserID, telegramID, sku)
+	
+	if err != nil {
+		h.logger.Errorf("Failed to create order: %v", err)
+
+		if strings.Contains(err.Error(), "insufficient") {
+			insufficientMarkup := &telebot.ReplyMarkup{ResizeKeyboard: true}
+			btnCharge := insufficientMarkup.Data("➕ شارژ کیف پول", "charge_wallet")
+			btnBack := insufficientMarkup.Data("🔙 بازگشت به منوی اصلی", "main_menu")
+			insufficientMarkup.Inline(
+				insufficientMarkup.Row(btnCharge),
+				insufficientMarkup.Row(btnBack),
+			)
+
+			return c.Send("💸 <b>موجودی ناکافی</b>\n\nکیف پول شما به اندازه کافی شارژ ندارد.\n\nآیا می‌خواهید کیف پول خود را شارژ کنید؟", &telebot.SendOptions{
+				ParseMode:   telebot.ModeHTML,
+				ReplyMarkup: insufficientMarkup,
+			})
+		}
+
+		// نمایش خطای عمومی
+		return c.Send("❌ ثبت سفارش ناموفق بود. لطفا با پشتیبانی تماس بگیرید.")
+	}
+
+	deliveryMsg := fmt.Sprintf(
+		"✅ <b>سفارش با موفقیت ثبت شد!</b>\n\n"+
+			"🔢 <b>شناسه سفارش:</b> <code>%d</code>\n"+
+			"💰 <b>مبلغ:</b> %.0f تومان\n\n"+
+			"🔑 <b>اطلاعات اکانت شما:</b>\n"+
+			"<pre>%s</pre>",
+		order.OrderID,
+		order.Amount,
+		h.escapeHTML(order.DeliveredData),
+	)
+
+	successMarkup := &telebot.ReplyMarkup{ResizeKeyboard: true}
+	btnMainMenu := successMarkup.Data("🏠 منوی اصلی", "main_menu")
+	successMarkup.Inline(successMarkup.Row(btnMainMenu))
+
+	return c.Send(deliveryMsg, &telebot.SendOptions{
+		ParseMode:   telebot.ModeHTML,
+		ReplyMarkup: successMarkup,
+	})
+}
+
+// ... (بقیه توابع بدون تغییر)
+
 func (h *Handler) Profile(c telebot.Context) error {
 	userID := c.Sender().ID
 	h.logger.Infof("User %d viewing profile", userID)
@@ -236,7 +285,6 @@ func (h *Handler) Profile(c telebot.Context) error {
 	})
 }
 
-// ShowSubscriptionDetail implements the interface method
 func (h *Handler) ShowSubscriptionDetail(c telebot.Context, subID int64) error {
 	subs, err := h.botService.GetUserSubscriptions(c.Sender().ID)
 	if err != nil {
@@ -328,56 +376,6 @@ func (h *Handler) Support(c telebot.Context) error {
 	})
 }
 
-func (h *Handler) ProcessProductOrder(c telebot.Context, productTitle string, price float64) error {
-	h.logger.Infof("User %d ordering product: %s", c.Sender().ID, productTitle)
-
-	user, err := h.botService.GetProfile(c)
-	if err != nil {
-		return c.Send("❌ خطا در پردازش سفارش.")
-	}
-
-	sku := extractSKU(productTitle)
-
-	order, err := h.coreClient.CreateOrder(user.ID, sku)
-	if err != nil {
-		h.logger.Errorf("Failed to create order: %v", err)
-		if strings.Contains(err.Error(), "insufficient") {
-			insufficientMarkup := &telebot.ReplyMarkup{ResizeKeyboard: true}
-			btnCharge := insufficientMarkup.Data("➕ شارژ کیف پول", "charge_wallet")
-			btnBack := insufficientMarkup.Data("🔙 بازگشت به منوی اصلی", "main_menu")
-			insufficientMarkup.Inline(
-				insufficientMarkup.Row(btnCharge),
-				insufficientMarkup.Row(btnBack),
-			)
-			return c.Send("💸 <b>موجودی ناکافی</b>\n\nکیف پول شما به اندازه کافی شارژ ندارد.\n\nآیا می‌خواهید کیف پول خود را شارژ کنید؟", &telebot.SendOptions{
-				ParseMode:   telebot.ModeHTML,
-				ReplyMarkup: insufficientMarkup,
-			})
-		}
-		return c.Send(fmt.Sprintf("❌ ثبت سفارش ناموفق بود: %v", err))
-	}
-
-	deliveryMsg := fmt.Sprintf(
-		"✅ <b>سفارش با موفقیت ثبت شد!</b>\n\n"+
-			"🔢 <b>شناسه سفارش:</b> <code>%d</code>\n"+
-			"💰 <b>مبلغ:</b> %.0f تومان\n\n"+
-			"🔑 <b>اطلاعات اکانت شما:</b>\n"+
-			"<pre>%s</pre>",
-		order.OrderID,
-		order.Amount,
-		h.escapeHTML(order.DeliveredData),
-	)
-
-	successMarkup := &telebot.ReplyMarkup{ResizeKeyboard: true}
-	btnMainMenu := successMarkup.Data("🏠 منوی اصلی", "main_menu")
-	successMarkup.Inline(successMarkup.Row(btnMainMenu))
-
-	return c.Send(deliveryMsg, &telebot.SendOptions{
-		ParseMode:   telebot.ModeHTML,
-		ReplyMarkup: successMarkup,
-	})
-}
-
 func (h *Handler) ChargeWallet(c telebot.Context) error {
 	h.botService.SetUserState(c.Sender().ID, domain.StateWaitingForAmount)
 	return c.Send("💰 <b>مقدار شارژ را (به تومان) وارد کنید:</b>\n\nمثال: 100000", &telebot.SendOptions{
@@ -431,20 +429,6 @@ func (h *Handler) escapeHTML(s string) string {
 	return replacer.Replace(s)
 }
 
-func extractSKU(title string) string {
-	parts := strings.Split(title, " | ") // Updated split delimiter
-	if len(parts) > 0 {
-		return strings.ToLower(strings.ReplaceAll(parts[0], " ", "-"))
-	}
-	// Fallback to old format
-	parts = strings.Split(title, " - ")
-	if len(parts) > 0 {
-		return strings.ToLower(strings.ReplaceAll(parts[0], " ", "-"))
-	}
-	return "unknown"
-}
-
-// تابع کمکی برای آیکون‌ها
 func getCategoryIcon(cat string) string {
 	catLower := strings.ToLower(cat)
 	if strings.Contains(catLower, "chatgpt") || strings.Contains(catLower, "gpt") {

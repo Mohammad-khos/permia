@@ -157,3 +157,79 @@ func (s *OrderService) GetUserSubscriptions(ctx context.Context, telegramID int6
     // 2. دریافت تاریخچه سفارشات
     return s.orderRepo.GetHistoryByUserID(ctx, user.ID)
 }
+
+// CreateOrder ایجاد سفارش جدید
+func (s *OrderService) CreateOrder(ctx context.Context, userID, productID uint, sku string) (*domain.Order, error) {
+	// 1. پیدا کردن محصول (با اولویت SKU)
+	var product *domain.Product
+	var err error
+
+	if sku != "" {
+		product, err = s.productRepo.GetBySKU(ctx, sku)
+		if err != nil {
+			return nil, fmt.Errorf("product not found with sku: %s", sku)
+		}
+	} else if productID > 0 {
+		return nil, fmt.Errorf("product lookup by ID not implemented yet")
+	} else {
+		return nil, fmt.Errorf("invalid product identifier")
+	}
+
+	// 2. ساخت آبجکت اولیه سفارش
+	order := &domain.Order{
+		UserID:        userID,
+		ProductID:     product.ID,
+		OrderNumber:   fmt.Sprintf("ORD-%d-%d", userID, time.Now().Unix()),
+		Amount:        product.Price,
+		Status:        domain.OrderCompleted,
+		PaymentMethod: "wallet",
+		CreatedAt:     time.Now(),
+	}
+
+	// 3. اجرای تراکنش (کسر موجودی + تخصیص اکانت + ثبت سفارش)
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		// الف) کسر موجودی
+		if err := s.userRepo.UpdateWallet(ctx, userID, -product.Price); err != nil {
+			return fmt.Errorf("insufficient funds or wallet error: %v", err)
+		}
+
+		// ب) رزرو و تحویل اکانت
+		if product.Type == "shared" || product.Type == "ready_made" {
+			// نکته: در پیاده‌سازی واقعی GetAvailableAccount حتما از قفل رکورد استفاده کنید
+			account, err := s.accountRepo.GetAvailableAccount(ctx, product.SKU)
+			
+			if err == nil && account != nil {
+				order.AccountID = &account.ID
+				
+				// ✅ اصلاح شده: استفاده از Email به جای Username
+				userCredential := account.Email 
+				if userCredential == "" {
+					userCredential = fmt.Sprintf("%d", account.ID) // فال‌بک به ID اگر ایمیل نبود
+				}
+				
+				order.DeliveredData = fmt.Sprintf("User: %s\nPass: %s", userCredential, account.Password)
+
+				// مارک کردن به عنوان فروخته شده
+				if err := s.accountRepo.MarkAsSold(ctx, account.ID); err != nil {
+					return fmt.Errorf("failed to mark account as sold: %v", err)
+				}
+			} else {
+				// اگر موجودی نبود، فقط پیام ثبت سفارش را می‌گذاریم
+				order.DeliveredData = "سفارش ثبت شد. اطلاعات به زودی توسط پشتیبانی ارسال می‌شود."
+			}
+		}
+
+		// ج) ثبت نهایی سفارش
+		if err := s.orderRepo.Create(ctx, order); err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return order, nil
+}

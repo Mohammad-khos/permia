@@ -3,20 +3,17 @@ package core
 import (
 	"Permia/bot-service/internal/domain"
 	"fmt"
-	"net/http"
 	"strings"
 
 	"github.com/go-resty/resty/v2"
 	"go.uber.org/zap"
 )
 
-// Client is a client for the core service API.
 type Client struct {
 	resty  *resty.Client
 	logger *zap.SugaredLogger
 }
 
-// NewClient creates a new core service client.
 func NewClient(baseURL string, logger *zap.SugaredLogger) *Client {
 	r := resty.New().
 		SetBaseURL(baseURL).
@@ -28,22 +25,14 @@ func NewClient(baseURL string, logger *zap.SugaredLogger) *Client {
 	}
 }
 
-// LoginUserRequest is the payload for the login request.
-type LoginUserRequest struct {
-	TelegramID int64  `json:"telegram_id"`
-	Username   string `json:"username"`
-	FirstName  string `json:"first_name"`
-	LastName   string `json:"last_name"`
-}
-
 // LoginUser calls the core service to log in or register a user.
 func (c *Client) LoginUser(telegramID int64, username, firstName, lastName string) (*domain.User, error) {
 	var user domain.User
-	payload := LoginUserRequest{
-		TelegramID: telegramID,
-		Username:   username,
-		FirstName:  firstName,
-		LastName:   lastName,
+	payload := map[string]interface{}{
+		"telegram_id": telegramID,
+		"username":    username,
+		"first_name":  firstName,
+		"last_name":   lastName,
 	}
 
 	resp, err := c.resty.R().
@@ -63,31 +52,33 @@ func (c *Client) LoginUser(telegramID int64, username, firstName, lastName strin
 	return &user, nil
 }
 
-// GetProfile calls the core service to get a user's profile and balance.
+// GetProfile calls the core service to get a user's profile.
 func (c *Client) GetProfile(telegramID int64) (*domain.User, error) {
-	var user domain.User
+	var result struct {
+		Data domain.User `json:"data"`
+	}
+
+	// استفاده از اندپوینت جدید برای دریافت دیتای کامل
 	resp, err := c.resty.R().
-		SetResult(&user).
-		Get(fmt.Sprintf("/users/by-telegram/%d/balance", telegramID))
+		SetResult(&result).
+		Get(fmt.Sprintf("/users/by-telegram/%d", telegramID))
 
 	if err != nil {
-		c.logger.Errorf("Core service GetProfile request failed: %v", err)
+		c.logger.Errorf("GetProfile request failed: %v", err)
 		return nil, fmt.Errorf("core service is unavailable")
 	}
-	if resp.StatusCode() == http.StatusNotFound {
-		return nil, nil // User not found is not a system error
+	if resp.StatusCode() == 404 {
+		return nil, nil
 	}
 	if resp.IsError() {
-		c.logger.Errorf("Core service GetProfile returned error: %s", resp.String())
-		return nil, fmt.Errorf("failed to get profile, status: %s", resp.Status())
+		return nil, fmt.Errorf("failed to get profile: %s", resp.Status())
 	}
 
-	return &user, nil
+	return &result.Data, nil
 }
 
 // GetProducts calls the core service to get the list of available products.
 func (c *Client) GetProducts() ([]domain.Product, error) {
-	// Core returns a standard response wrapping data under `data`.
 	var res struct {
 		Success bool                        `json:"success"`
 		Message string                      `json:"message"`
@@ -103,11 +94,9 @@ func (c *Client) GetProducts() ([]domain.Product, error) {
 		return nil, fmt.Errorf("core service is unavailable")
 	}
 	if resp.IsError() {
-		c.logger.Errorf("Core service GetProducts returned error: %s", resp.String())
 		return nil, fmt.Errorf("failed to get products, status: %s", resp.Status())
 	}
 
-	// Flatten catalog into slice
 	var products []domain.Product
 	for _, list := range res.Data {
 		products = append(products, list...)
@@ -116,14 +105,13 @@ func (c *Client) GetProducts() ([]domain.Product, error) {
 	return products, nil
 }
 
-// CreateOrderRequest is the payload for creating an order
+// CreateOrderRequest ساختار آپدیت شده (شامل TelegramID)
 type CreateOrderRequest struct {
-	UserID    uint   `json:"user_id"`
-	ProductID uint   `json:"product_id"`
-	SKU       string `json:"sku"`
+	UserID     uint   `json:"user_id"`
+	TelegramID int64  `json:"telegram_id"` // فیلد ضروری جدید
+	SKU        string `json:"sku"`
 }
 
-// CreateOrderResponse is the response from creating an order
 type CreateOrderResponse struct {
 	OrderID       uint    `json:"id"`
 	OrderNumber   string  `json:"order_number"`
@@ -132,11 +120,12 @@ type CreateOrderResponse struct {
 	DeliveredData string  `json:"delivered_data"`
 }
 
-// CreateOrder creates a new order
-func (c *Client) CreateOrder(userID uint, sku string) (*CreateOrderResponse, error) {
+// CreateOrder متد آپدیت شده: دریافت telegramID به عنوان پارامتر دوم
+func (c *Client) CreateOrder(userID uint, telegramID int64, sku string) (*CreateOrderResponse, error) {
 	payload := CreateOrderRequest{
-		UserID: userID,
-		SKU:    sku,
+		UserID:     userID,
+		TelegramID: telegramID,
+		SKU:        sku,
 	}
 
 	var result CreateOrderResponse
@@ -146,91 +135,64 @@ func (c *Client) CreateOrder(userID uint, sku string) (*CreateOrderResponse, err
 		Post("/orders")
 
 	if err != nil {
-		c.logger.Errorf("Core service CreateOrder request failed: %v", err)
+		c.logger.Errorf("CreateOrder request failed: %v", err)
 		return nil, fmt.Errorf("core service is unavailable")
 	}
+	
+	// بررسی دقیق‌تر خطا
 	if resp.IsError() {
-		c.logger.Errorf("Core service CreateOrder returned error: %s", resp.String())
-		// Check for insufficient funds error
+		c.logger.Errorf("Core CreateOrder error body: %s", resp.String())
 		if resp.StatusCode() == 400 && contains(resp.String(), "insufficient") {
 			return nil, fmt.Errorf("insufficient funds")
 		}
+		// برگرداندن متن خطا برای دیباگ بهتر
 		return nil, fmt.Errorf("failed to create order: %s", resp.String())
 	}
 
 	return &result, nil
 }
 
-// GetUserSubscriptions دریافت لیست اشتراک‌های کاربر
+// GetUserSubscriptions دریافت لیست اشتراک‌ها
 func (c *Client) GetUserSubscriptions(telegramID int64) ([]domain.Subscription, error) {
 	var response struct {
-		Data []domain.Subscription `json:"data"` // چون در Core از response.Success استفاده کردیم، دیتا داخل فیلد data است
+		Data []domain.Subscription `json:"data"`
 	}
 
-	// ارسال درخواست به Core
 	resp, err := c.resty.R().
 		SetHeader("X-Telegram-ID", fmt.Sprintf("%d", telegramID)).
 		SetResult(&response).
 		Get("/users/subscriptions")
 
-	if err != nil {
-		c.logger.Errorf("Error fetching subscriptions: %v", err)
+	if err != nil || resp.IsError() {
 		return nil, err
-	}
-
-	if resp.IsError() {
-		return nil, fmt.Errorf("API error: %s", resp.Status())
 	}
 
 	return response.Data, nil
 }
 
-// ChargeRequest is the payload for initiating a charge
-type ChargeRequest struct {
-	OrderID       uint   `json:"order_id"`
-	UserID        uint   `json:"user_id"`
-	PaymentMethod string `json:"payment_method"`
-}
-
-// ChargeResponse is the response from charging payment
-type ChargeResponse struct {
-	PaymentID       uint    `json:"payment_id"`
-	OrderID         uint    `json:"order_id"`
-	Amount          float64 `json:"amount"`
-	Status          string  `json:"status"`
-	VerificationURL string  `json:"verification_url"`
-	TransactionID   string  `json:"transaction_id"`
-}
-
-// GetPaymentLink initiates a payment charge and returns the payment link
+// GetPaymentLink دریافت لینک پرداخت
 func (c *Client) GetPaymentLink(userID uint, amount float64) (string, error) {
-	// First create a charge request
-	// Note: In production, you'd typically create an order first
+	var result struct {
+		VerificationURL string `json:"verification_url"`
+	}
 	payload := map[string]interface{}{
 		"user_id":        userID,
 		"amount":         amount,
 		"payment_method": "card",
 	}
 
-	var result ChargeResponse
 	resp, err := c.resty.R().
 		SetBody(payload).
 		SetResult(&result).
 		Post("/payment/charge")
 
-	if err != nil {
-		c.logger.Errorf("Core service GetPaymentLink request failed: %v", err)
+	if err != nil || resp.IsError() {
 		return "", fmt.Errorf("payment service unavailable")
-	}
-	if resp.IsError() {
-		c.logger.Errorf("Core service GetPaymentLink returned error: %s", resp.String())
-		return "", fmt.Errorf("failed to get payment link: %s", resp.String())
 	}
 
 	return result.VerificationURL, nil
 }
 
-// helper function to check if string contains substring
 func contains(str, substr string) bool {
 	return strings.Contains(str, substr)
 }

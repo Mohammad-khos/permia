@@ -10,7 +10,7 @@ import (
 
 type OrderHandler struct {
 	orderSvc *service.OrderService
-	userSvc  *service.UserService // برای چک کردن یوزر قبل از خرید
+	userSvc  *service.UserService
 }
 
 // SubscriptionResponse ساختار پاسخ سفارش اشتراک
@@ -21,7 +21,14 @@ type SubscriptionResponse struct {
 	DeliveredData string  `json:"DeliveredData"`
 	Amount        float64 `json:"amount"`
 	CreatedAt     string  `json:"CreatedAt"`
-	ExpiresAt     string  `json:"ExpiresAt"` // فیلد محاسبه شده
+	ExpiresAt     string  `json:"ExpiresAt"`
+}
+
+// CreateOrderRequest ساختار ورودی منعطف برای ثبت سفارش
+type CreateOrderRequest struct {
+	UserID     uint   `json:"user_id"`      // ارسالی از سمت بات
+	TelegramID int64  `json:"telegram_id"`  // برای پشتیبانی از کدهای قدیمی
+	SKU        string `json:"sku" binding:"required"`
 }
 
 func NewOrderHandler(orderSvc *service.OrderService, userSvc *service.UserService) *OrderHandler {
@@ -33,29 +40,42 @@ func NewOrderHandler(orderSvc *service.OrderService, userSvc *service.UserServic
 
 // CreateOrder ثبت سفارش جدید
 func (h *OrderHandler) CreateOrder(c *gin.Context) {
-	var req struct {
-		TelegramID int64  `json:"telegram_id" binding:"required"`
-		ProductSKU string `json:"sku" binding:"required"`
-	}
+	var req CreateOrderRequest
 
+	// 1. دریافت و اعتبارسنجی ورودی
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, 400, "Invalid Request Body")
+		response.Error(c, 400, "Invalid Request Body: " + err.Error())
 		return
 	}
 
-	// 1. پیدا کردن کاربر (چون شاید هنوز تو دیتابیس کش نشده باشه یا درخواست مستقیم باشه)
-	// نکته: در معماری میکروسرویس بهتره UserID رو از توکن بگیریم، ولی اینجا با TelegramID کار میکنیم
-	// فرض میکنیم کاربر قبلا Auth شده و UserID رو داریم، یا همینجا سریع فچ میکنیم
-	user, err := h.userSvc.GetOrCreateUser(c, req.TelegramID, "", "", "")
-	if err != nil {
-		response.ServerError(c, err)
+	// 2. تعیین شناسه کاربر (UserID)
+	var finalUserID uint
+
+	if req.UserID > 0 {
+		// اگر بات شناسه داخلی کاربر را فرستاده بود، از همان استفاده می‌کنیم
+		finalUserID = req.UserID
+	} else if req.TelegramID > 0 {
+		// اگر فقط تلگرام آیدی داشتیم، کاربر را پیدا یا ایجاد می‌کنیم
+		user, err := h.userSvc.GetOrCreateUser(c, req.TelegramID, "", "", "")
+		if err != nil {
+			response.ServerError(c, err)
+			return
+		}
+		finalUserID = user.ID
+	} else {
+		response.Error(c, 400, "Both user_id and telegram_id are missing")
 		return
 	}
 
-	// 2. انجام خرید
-	result, err := h.orderSvc.PurchaseFlow(c, user.ID, req.ProductSKU)
+	// 3. انجام خرید با شناسه نهایی کاربر
+	result, err := h.orderSvc.PurchaseFlow(c, finalUserID, req.SKU)
 	if err != nil {
-		// ارورهای بیزینسی (موجودی کم و...) رو با کد 400 برمیگردونیم
+		// خطا را چک می‌کنیم تا اگر مربوط به موجودی بود، کد مناسب برگردانیم
+		if err.Error() == "موجودی کافی نیست" || err.Error() == "insufficient funds" {
+			response.Error(c, 400, "insufficient funds")
+			return
+		}
+		// سایر ارورهای بیزینسی
 		response.Error(c, 400, err.Error())
 		return
 	}
@@ -64,19 +84,16 @@ func (h *OrderHandler) CreateOrder(c *gin.Context) {
 }
 
 // GetOrders لیست تمام سفارشات (برای مدیریت)
-// GET /api/v1/orders
 func (h *OrderHandler) GetOrders(c *gin.Context) {
 	orders, err := h.orderSvc.GetAllOrders(c)
 	if err != nil {
 		response.ServerError(c, err)
 		return
 	}
-
 	response.Success(c, orders, "Orders retrieved successfully")
 }
 
 // GetOrderByID دریافت جزئیات یک سفارش
-// GET /api/v1/orders/:id
 func (h *OrderHandler) GetOrderByID(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
@@ -90,14 +107,11 @@ func (h *OrderHandler) GetOrderByID(c *gin.Context) {
 		response.Error(c, 404, "Order not found")
 		return
 	}
-
 	response.Success(c, order, "Order retrieved successfully")
 }
 
-// GetUserSubscriptions دریافت سفارشات اشتراک کاربر بر اساس تلگرام آیدی
-// GET /api/v1/users/subscriptions
+// GetUserSubscriptions دریافت سفارشات اشتراک کاربر
 func (h *OrderHandler) GetUserSubscriptions(c *gin.Context) {
-	// دریافت شناسه تلگرام از هدر (که بات ارسال می‌کند)
 	telegramIDStr := c.GetHeader("X-Telegram-ID")
 	if telegramIDStr == "" {
 		response.Error(c, 400, "X-Telegram-ID header is required")
@@ -112,21 +126,15 @@ func (h *OrderHandler) GetUserSubscriptions(c *gin.Context) {
 		return
 	}
 
-	// تبدیل داده‌های دیتابیس به فرمت پاسخ API
 	var result []SubscriptionResponse
 	for _, o := range orders {
-		// محاسبه تاریخ انقضا (فرض بر ۳۰ روزه بودن)
 		days := 30
 		expiryTime := o.CreatedAt.AddDate(0, 0, days)
 
 		result = append(result, SubscriptionResponse{
 			ID:            o.ID,
-            // اصلاح ۱: استفاده از Title به جای Name
-			ProductName:   o.Product.Title, 
-            
-            // اصلاح ۲: دسترسی به SKU از طریق آبجکت Product
-			Sku:           o.Product.SKU,   
-            
+			ProductName:   o.Product.Title,
+			Sku:           o.Product.SKU,
 			DeliveredData: o.DeliveredData,
 			Amount:        o.Amount,
 			CreatedAt:     o.CreatedAt.Format("2006-01-02"),
