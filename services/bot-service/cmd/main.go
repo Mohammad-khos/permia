@@ -64,6 +64,9 @@ func main() {
 	h := handler.New(bot, commandHandler, menuHandler)
 	h.Register()
 
+	// Register callback query handler BEFORE starting bot
+	registerCallbackHandler(bot, menuHandler, sessionRepo, sugar)
+
 	// Register text message handlers for interactive flows
 	registerMessageHandlers(bot, menuHandler, sessionRepo, sugar)
 
@@ -71,79 +74,8 @@ func main() {
 	bot.Start()
 }
 
-// registerMessageHandlers registers text message handlers for interactive bot flows
-func registerMessageHandlers(bot *telebot.Bot, menuHandler *menus.Handler, sessionRepo repository.SessionRepository, logger *zap.SugaredLogger) {
-	// Handle text messages
-	bot.Handle(telebot.OnText, func(c telebot.Context) error {
-		text := c.Text()
-		userID := c.Sender().ID
-		logger.Debugf("Received text from %d: %s", userID, text)
-
-		// Get current user state
-		state := sessionRepo.GetState(userID)
-
-		// Handle state-specific inputs first
-		if state == domain.StateWaitingForAmount {
-			// User is expected to enter an amount
-			amount, err := strconv.ParseFloat(strings.TrimSpace(text), 64)
-			if err != nil || amount <= 0 {
-				return c.Send("❌ مقدار نامعتبر است. لطفا عدد معتبر وارد کنید.")
-			}
-			// Reset state after processing
-			sessionRepo.SetState(userID, domain.StateNone)
-			return menuHandler.ProcessChargeAmount(c, text)
-		}
-
-		// Handle main menu buttons (these should reset state)
-		if text == "🛒 خرید اشتراک" {
-			sessionRepo.SetState(userID, domain.StateNone)
-			return menuHandler.Buy(c)
-		}
-		if text == "👤 پروفایل" {
-			sessionRepo.SetState(userID, domain.StateNone)
-			return menuHandler.Profile(c)
-		}
-		if text == "💳 کیف پول" {
-			sessionRepo.SetState(userID, domain.StateNone)
-			return menuHandler.Wallet(c)
-		}
-		if text == "📞 پشتیبانی" {
-			sessionRepo.SetState(userID, domain.StateNone)
-			return menuHandler.Support(c)
-		}
-		if text == "🔙 بازگشت به منوی اصلی" {
-			sessionRepo.SetState(userID, domain.StateNone)
-			return menuHandler.MainMenu(c)
-		}
-		if text == "➕ شارژ کیف پول" {
-			// Set state to waiting for amount
-			sessionRepo.SetState(userID, domain.StateWaitingForAmount)
-			return menuHandler.ChargeWallet(c)
-		}
-
-		// Handle category selection (text version)
-		if len(text) > 2 && text[0:2] == "📁 " {
-			sessionRepo.SetState(userID, domain.StateNone)
-			category := strings.TrimPrefix(text, "📁 ")
-			return menuHandler.ShowProducts(c, category)
-		}
-
-		// Handle product purchase (text version)
-		// Check if it looks like a product selection (contains price indicator)
-		if len(text) > 2 && text[len(text)-1] == 'T' {
-			sessionRepo.SetState(userID, domain.StateNone)
-			// Extract product name and price
-			logger.Infof("User %d selecting product: %s", userID, text)
-			return menuHandler.ProcessProductOrder(c, text, 0)
-		}
-
-		// Default response for unhandled text
-		return c.Send("❓ متوجه نشدم. لطفا از دکمه‌های منو استفاده کنید.", &telebot.SendOptions{
-			ReplyMarkup: menus.MainMenuMarkup,
-		})
-	})
-
-	// Handle callback queries (inline buttons)
+// registerCallbackHandler registers callback query handlers (inline buttons)
+func registerCallbackHandler(bot *telebot.Bot, menuHandler *menus.Handler, sessionRepo repository.SessionRepository, logger *zap.SugaredLogger) {
 	bot.Handle(telebot.OnCallback, func(c telebot.Context) error {
 		data := c.Data()
 		userID := c.Sender().ID
@@ -206,7 +138,75 @@ func registerMessageHandlers(bot *telebot.Bot, menuHandler *menus.Handler, sessi
 	})
 }
 
-// parseAmount is a helper to check if text is a valid amount
-func parseAmount(text string) (float64, error) {
-	return strconv.ParseFloat(strings.TrimSpace(text), 64)
+// registerMessageHandlers registers text message handlers for interactive bot flows
+func registerMessageHandlers(bot *telebot.Bot, menuHandler *menus.Handler, sessionRepo repository.SessionRepository, logger *zap.SugaredLogger) {
+	// Handle text messages
+	bot.Handle(telebot.OnText, func(c telebot.Context) error {
+		text := c.Text()
+		userID := c.Sender().ID
+		logger.Debugf("Received text from %d: %s", userID, text)
+
+		// Get current user state
+		state := sessionRepo.GetState(userID)
+
+		// Handle state-specific inputs first
+		if state == domain.StateWaitingForAmount {
+			// User is expected to enter an amount
+			amount, err := strconv.ParseFloat(strings.TrimSpace(text), 64)
+			if err != nil || amount <= 0 {
+				return c.Send("❌ مقدار نامعتبر است. لطفا عدد معتبر وارد کنید.")
+			}
+			// Reset state after processing
+			sessionRepo.SetState(userID, domain.StateNone)
+			return menuHandler.ProcessChargeAmount(c, text)
+		}
+
+		// Handle main menu buttons (these should reset state)
+		if text == "🛒 خرید اشتراک" {
+			sessionRepo.SetState(userID, domain.StateNone)
+			return menuHandler.Buy(c)
+		}
+		if text == "👤 پروفایل" {
+			sessionRepo.SetState(userID, domain.StateNone)
+			return menuHandler.Profile(c)
+		}
+		if text == "💳 کیف پول" {
+			sessionRepo.SetState(userID, domain.StateNone)
+			return menuHandler.Wallet(c)
+		}
+		if text == "📞 پشتیبانی" {
+			sessionRepo.SetState(userID, domain.StateNone)
+			return menuHandler.Support(c)
+		}
+		if text == "🔙 بازگشت به منوی اصلی" {
+			sessionRepo.SetState(userID, domain.StateNone)
+			return menuHandler.MainMenu(c)
+		}
+		if text == "➕ شارژ کیف پول" {
+			// Set state to waiting for amount
+			sessionRepo.SetState(userID, domain.StateWaitingForAmount)
+			return menuHandler.ChargeWallet(c)
+		}
+
+		// Handle category selection (text version)
+		if len(text) > 2 && text[0:2] == "📂" {
+			sessionRepo.SetState(userID, domain.StateNone)
+			category := strings.TrimPrefix(text, "📂 ")
+			return menuHandler.ShowProducts(c, category)
+		}
+
+		// Handle product purchase (text version)
+		// Check if it looks like a product selection (contains price indicator)
+		if strings.Contains(text, " - ") && strings.HasSuffix(text, " T") {
+			sessionRepo.SetState(userID, domain.StateNone)
+			// Extract product name and price
+			logger.Infof("User %d selecting product: %s", userID, text)
+			return menuHandler.ProcessProductOrder(c, text, 0)
+		}
+
+		// Default response for unhandled text
+		return c.Send("❓ متوجه نشدم. لطفا از دکمه‌های منو استفاده کنید.", &telebot.SendOptions{
+			ReplyMarkup: menus.MainMenuMarkup,
+		})
+	})
 }

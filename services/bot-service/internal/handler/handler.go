@@ -34,11 +34,6 @@ func New(bot *telebot.Bot, commands CommandHandler, menus MenuHandler) *Handler 
 
 func (h *Handler) Register() {
 	h.bot.Handle("/start", h.commands.Start)
-	// Register callback query handler
-	h.bot.Handle(telebot.OnCallback, func(c telebot.Context) error {
-		// Pass callback queries to menu handler
-		// This will be implemented in menus package
-		return nil
-	})
-	// Additional routing is handled in main.go via OnText handler
+	// OnCallback and OnText handlers are registered in main.go
+	// to avoid conflicts and centralize message routing logic
 }
