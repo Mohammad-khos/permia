@@ -16,8 +16,9 @@ type MenuHandler interface {
 	Profile(c telebot.Context) error
 	Wallet(c telebot.Context) error
 	Support(c telebot.Context) error
+	PreviewInvoice(c telebot.Context, sku string) error
 	ShowProducts(c telebot.Context, category string) error
-	ProcessProductOrder(c telebot.Context, productTitle string, price float64) error
+	ProcessProductOrder(c telebot.Context, sku string) error
 	ChargeWallet(c telebot.Context) error
 	ProcessChargeAmount(c telebot.Context, amountStr string) error
 }
