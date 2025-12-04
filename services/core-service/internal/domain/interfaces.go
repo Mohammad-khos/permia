@@ -11,6 +11,8 @@ type UserRepository interface {
 	UpdateWallet(ctx context.Context, userID uint, amount float64) error
 	GetByID(ctx context.Context, id uint) (*User, error)
 	IncrementTotalSpent(ctx context.Context, userID uint, amount float64) error
+	GetByReferralCode(ctx context.Context, code string) (*User, error)
+	IncrementReferrals(ctx context.Context, userID uint) error
 }
 
 // ProductRepository قرارداد کار با محصولات

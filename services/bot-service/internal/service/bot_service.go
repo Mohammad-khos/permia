@@ -11,7 +11,7 @@ import (
 
 // CoreClient defines the interface for the core service client.
 type CoreClient interface {
-	LoginUser(telegramID int64, username, firstName, lastName string) (*domain.User, error)
+	LoginUser(telegramID int64, username, firstName, lastName , referalCode string) (*domain.User, error)
 	GetProfile(telegramID int64) (*domain.User, error)
 	GetProducts() ([]domain.Product, error)
 	GetUserSubscriptions(telegramID int64) ([]domain.Subscription, error) // Added
@@ -49,8 +49,8 @@ func (s *BotService) HandleError(c telebot.Context, err error) error {
 	return c.Send("❌ خطای غیرمنتظره‌ای رخ داد. لطفا بعدا دوباره تلاش کنید.")
 }
 
-func (s *BotService) Login(c telebot.Context) (*domain.User, error) {
-	user, err := s.coreClient.LoginUser(c.Sender().ID, c.Sender().Username, c.Sender().FirstName, c.Sender().LastName)
+func (s *BotService) Login(c telebot.Context , referralCode string) (*domain.User, error) {
+	user, err := s.coreClient.LoginUser(c.Sender().ID, c.Sender().Username, c.Sender().FirstName, c.Sender().LastName , referralCode)
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +63,7 @@ func (s *BotService) GetProfile(c telebot.Context) (*domain.User, error) {
 		return nil, err
 	}
 	if user == nil {
-		return s.Login(c)
+		return s.Login(c , "") // تلاش برای ورود مجدد کاربر
 	}
 	return user, nil
 }
@@ -91,4 +91,8 @@ func (s *BotService) SetUserState(userID int64, state domain.UserState) {
 
 func (s *BotService) GetUserState(userID int64) domain.UserState {
 	return s.sessionRepo.GetState(userID)
+}
+
+func (s *BotService) GetBotUsername() string {
+	return s.bot.Me.Username
 }

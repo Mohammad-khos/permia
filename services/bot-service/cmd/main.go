@@ -201,7 +201,11 @@ func registerMessageHandlers(bot *telebot.Bot, menuHandler *menus.Handler, sessi
 		case "➕ شارژ کیف پول":
 			sessionRepo.SetState(userID, domain.StateNone)
 			return menuHandler.ChargeWallet(c)
+		case "🔗 دریافت لینک دعوت":
+			sessionRepo.SetState(userID, domain.StateNone)
+			return menuHandler.GetReferralLink(c)
 		}
+		
 
 		// Handle Category Selection (Dynamic Emojis)
 		if isCategory, catName := extractCategory(text); isCategory {

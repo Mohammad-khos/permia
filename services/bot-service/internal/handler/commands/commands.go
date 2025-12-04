@@ -19,7 +19,8 @@ func NewHandler(botService *service.BotService) *Handler {
 
 // Start handles the /start command.
 func (h *Handler) Start(c telebot.Context) error {
-	_, err := h.botService.Login(c)
+	referralCode := c.Message().Payload
+	_, err := h.botService.Login(c , referralCode)
 	if err != nil {
 		return h.botService.HandleError(c, err)
 	}

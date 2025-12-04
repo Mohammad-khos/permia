@@ -20,6 +20,7 @@ var (
 	BtnProfile     = MainMenuMarkup.Text("👤 پروفایل")
 	BtnWallet      = MainMenuMarkup.Text("💳 کیف پول")
 	BtnSupport     = MainMenuMarkup.Text("📞 پشتیبانی")
+	BtnReferral = MainMenuMarkup.Text("🔗 دریافت لینک دعوت") 
 
 	// Back Button
 	BackMarkup    = &telebot.ReplyMarkup{ResizeKeyboard: true}
@@ -40,6 +41,7 @@ func NewHandler(botService *service.BotService, coreClient *core.Client, logger 
 	MainMenuMarkup.Reply(
 		MainMenuMarkup.Row(BtnBuy, BtnProfile),
 		MainMenuMarkup.Row(BtnWallet, BtnSupport),
+		MainMenuMarkup.Row(BtnReferral),
 	)
 	BackMarkup.Reply(BackMarkup.Row(BtnBackToMain))
 	WalletMarkup.Reply(
@@ -70,6 +72,31 @@ func (h *Handler) MainMenu(c telebot.Context) error {
 	return c.Send(msg, &telebot.SendOptions{
 		ReplyMarkup: inlineMainMenuMarkup,
 	})
+}
+
+// هندلر جدید برای نمایش لینک دعوت
+func (h *Handler) GetReferralLink(c telebot.Context) error {
+	user, err := h.botService.GetProfile(c)
+	if err != nil {
+		return c.Send("❌ خطا در دریافت اطلاعات کاربری.")
+	}
+
+	// ساخت لینک دعوت
+	// نام کاربری بات را باید از کانفیگ یا خود بات بگیرید. اینجا فرض می‌کنیم PermiaBot است.
+	botUsername := h.botService.GetBotUsername() 
+	refLink := fmt.Sprintf("https://t.me/%s?start=%s", botUsername, user.ReferralCode)
+
+	msg := fmt.Sprintf(
+		"🎁 **دعوت از دوستان**\n\n"+
+			"با دعوت دوستان خود به پرمیا، در خریدهای آن‌ها شریک شوید!\n\n"+
+			"🔗 **لینک اختصاصی شما:**\n`%s`\n\n"+
+			"👥 **تعداد دعوت‌های شما:** %d نفر\n\n"+
+			"👇 لینک بالا را برای دوستانتان ارسال کنید.",
+		refLink,
+		user.TotalReferrals, // این فیلد باید در مدل User وجود داشته باشد
+	)
+
+	return c.Send(msg, &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
 }
 
 // Buy Flow

@@ -24,6 +24,7 @@ func (h *UserHandler) AuthUser(c *gin.Context) {
 		Username   string `json:"username"`
 		FirstName  string `json:"first_name"`
 		LastName   string `json:"last_name"`
+		ReferralCode string `json:"referral_code"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -31,7 +32,7 @@ func (h *UserHandler) AuthUser(c *gin.Context) {
 		return
 	}
 
-	user, err := h.userSvc.GetOrCreateUser(c, req.TelegramID, req.Username, req.FirstName, req.LastName)
+	user, err := h.userSvc.GetOrCreateUser(c, req.TelegramID, req.Username, req.FirstName, req.LastName , req.ReferralCode)
 	if err != nil {
 		response.ServerError(c, err)
 		return

@@ -61,3 +61,19 @@ func (r *userRepository) IncrementTotalSpent(ctx context.Context, userID uint, a
 		Where("id = ?", userID).
 		Update("total_spent", gorm.Expr("total_spent + ?", amount)).Error
 }
+
+// GetByReferralCode پیدا کردن کاربر با کد دعوت
+func (r *userRepository) GetByReferralCode(ctx context.Context, code string) (*domain.User, error) {
+	var user domain.User
+	if err := r.db.WithContext(ctx).Where("referral_code = ?", code).First(&user).Error; err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+// IncrementReferrals افزایش تعداد دعوت‌شده‌ها
+func (r *userRepository) IncrementReferrals(ctx context.Context, userID uint) error {
+	return r.db.WithContext(ctx).Model(&domain.User{}).
+		Where("id = ?", userID).
+		Update("total_referrals", gorm.Expr("total_referrals + 1")).Error
+}

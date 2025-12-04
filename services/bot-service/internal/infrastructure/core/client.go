@@ -25,18 +25,27 @@ func NewClient(baseURL string, logger *zap.SugaredLogger) *Client {
 	}
 }
 
+type LoginUserRequest struct {
+	TelegramID   int64  `json:"telegram_id"`
+	Username     string `json:"username"`
+	FirstName    string `json:"first_name"`
+	LastName     string `json:"last_name"`
+	ReferralCode string `json:"referral_code"` // اضافه شد
+}
+
 // LoginUser calls the core service to log in or register a user.
-func (c *Client) LoginUser(telegramID int64, username, firstName, lastName string) (*domain.User, error) {
+func (c *Client) LoginUser(telegramID int64, username, firstName, lastName, referralCode string) (*domain.User, error) {
 	// ✅ اصلاح شده: استفاده از ساختار لفاف‌پیچی شده (Wrapped) برای دریافت دیتا
 	var result struct {
 		Data domain.User `json:"data"`
 	}
-	
-	payload := map[string]interface{}{
-		"telegram_id": telegramID,
-		"username":    username,
-		"first_name":  firstName,
-		"last_name":   lastName,
+
+	payload := LoginUserRequest{
+		TelegramID:   telegramID,
+		Username:     username,
+		FirstName:    firstName,
+		LastName:     lastName,
+		ReferralCode: referralCode, // ارسال به Core
 	}
 
 	resp, err := c.resty.R().
@@ -55,7 +64,6 @@ func (c *Client) LoginUser(telegramID int64, username, firstName, lastName strin
 
 	return &result.Data, nil // بازگرداندن دیتای واقعی
 }
-
 
 // GetProfile calls the core service to get a user's profile.
 func (c *Client) GetProfile(telegramID int64) (*domain.User, error) {
@@ -148,7 +156,7 @@ func (c *Client) CreateOrder(userID uint, telegramID int64, sku string) (*Create
 		c.logger.Errorf("CreateOrder request failed: %v", err)
 		return nil, fmt.Errorf("core service is unavailable")
 	}
-	
+
 	if resp.IsError() {
 		c.logger.Errorf("Core CreateOrder error body: %s", resp.String())
 		if resp.StatusCode() == 400 && contains(resp.String(), "insufficient") {

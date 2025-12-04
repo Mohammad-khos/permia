@@ -8,7 +8,11 @@ type User struct {
 	TelegramID int64     `json:"telegram_id"`
 	Username   string    `json:"username"`
 	Balance    float64   `json:"wallet_balance"`
+	ReferralCode string    `json:"referral_code"`
+	TotalReferrals int       `json:"total_referrals"`
 	CreatedAt  time.Time `json:"created_at"`
+
+	
 }
 
 // Product represents a sellable item.
