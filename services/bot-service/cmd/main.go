@@ -69,7 +69,15 @@ func main() {
 
 	// Register text message handlers
 	registerMessageHandlers(bot, menuHandler, sessionRepo, sugar)
+	botCommands := []telebot.Command{
+		{Text: "start", Description: "🚀 شروع و نمایش منوی اصلی"},
+		// اگر کامندهای دیگری دارید می‌توانید اینجا اضافه کنید
+		// {Text: "help", Description: "راهنما"},
+	}
 
+	if err := bot.SetCommands(botCommands); err != nil {
+		sugar.Errorf("Failed to set bot commands: %v", err)
+	}
 	sugar.Info("🤖 Bot is starting...")
 	bot.Start()
 }
