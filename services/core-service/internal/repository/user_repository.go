@@ -52,3 +52,12 @@ func (r *userRepository) UpdateWallet(ctx context.Context, userID uint, amount f
 		Where("id = ?", userID).
 		Update("wallet_balance", gorm.Expr("wallet_balance + ?", amount)).Error
 }
+
+// به انتهای فایل اضافه کنید
+
+// IncrementTotalSpent مجموع خرید کاربر را افزایش می‌دهد
+func (r *userRepository) IncrementTotalSpent(ctx context.Context, userID uint, amount float64) error {
+	return r.db.WithContext(ctx).Model(&domain.User{}).
+		Where("id = ?", userID).
+		Update("total_spent", gorm.Expr("total_spent + ?", amount)).Error
+}

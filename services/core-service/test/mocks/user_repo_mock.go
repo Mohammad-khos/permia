@@ -31,6 +31,12 @@ func (m *MockUserRepository) UpdateWallet(ctx context.Context, userID uint, amou
 	return args.Error(0)
 }
 
+// متد جدید اضافه شده برای رفع خطای کامپایل
+func (m *MockUserRepository) IncrementTotalSpent(ctx context.Context, userID uint, amount float64) error {
+	args := m.Called(ctx, userID, amount)
+	return args.Error(0)
+}
+
 func (m *MockUserRepository) GetByID(ctx context.Context, id uint) (*domain.User, error) {
 	args := m.Called(ctx, id)
 	if args.Get(0) == nil {

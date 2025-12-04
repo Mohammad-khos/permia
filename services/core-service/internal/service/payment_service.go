@@ -138,6 +138,12 @@ func (s *PaymentService) Charge(ctx context.Context, req *ChargeRequest) (*Charg
 			return nil, err
 		}
 
+		// جدید: آپدیت مجموع خرید چون سفارش پرداخت شد
+		if err := s.userRepo.IncrementTotalSpent(ctx, req.UserID, order.Amount); err != nil {
+			s.logger.Error("Failed to update total spent", zap.Error(err))
+			// اینجا ارور را برمی‌گردانیم یا فقط لاگ می‌کنیم (ترجیحا لاگ، تا پروسه قطع نشود)
+		}
+
 		// Update order status
 		if err := s.orderRepo.UpdateStatus(ctx, order.ID, string(domain.OrderPaid)); err != nil {
 			s.logger.Error("Failed to update order status", zap.Uint("order_id", order.ID), zap.Error(err))
@@ -242,6 +248,10 @@ func (s *PaymentService) Verify(ctx context.Context, req *VerifyRequest) (*Verif
 	if err := s.orderRepo.UpdateStatus(ctx, order.ID, string(domain.OrderPaid)); err != nil {
 		s.logger.Error("Failed to update order status", zap.Uint("order_id", order.ID), zap.Error(err))
 		return nil, err
+	}
+
+	if err := s.userRepo.IncrementTotalSpent(ctx, order.UserID, payment.Amount); err != nil {
+		s.logger.Error("Failed to update total spent in verify", zap.Error(err))
 	}
 
 	// 5. Add funds to user wallet (if needed for future purchases)

@@ -10,6 +10,7 @@ type UserRepository interface {
 	GetByTelegramID(ctx context.Context, telegramID int64) (*User, error)
 	UpdateWallet(ctx context.Context, userID uint, amount float64) error
 	GetByID(ctx context.Context, id uint) (*User, error)
+	IncrementTotalSpent(ctx context.Context, userID uint, amount float64) error
 }
 
 // ProductRepository قرارداد کار با محصولات

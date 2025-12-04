@@ -105,8 +105,12 @@ func (s *OrderService) PurchaseFlow(ctx context.Context, userID uint, productSKU
 			return fmt.Errorf("invalid product type")
 		}
 
+// تغییر: آپدیت همزمان کیف پول و مجموع خرید
 		if err := tx.Model(&domain.User{}).Where("id = ?", userID).
-			Update("wallet_balance", gorm.Expr("wallet_balance - ?", product.Price)).Error; err != nil {
+			Updates(map[string]interface{}{
+				"wallet_balance": gorm.Expr("wallet_balance - ?", product.Price),
+				"total_spent":    gorm.Expr("total_spent + ?", product.Price),
+			}).Error; err != nil {
 			return err
 		}
 
@@ -185,6 +189,10 @@ func (s *OrderService) CreateOrder(ctx context.Context, userID, productID uint, 
 		// الف) کسر موجودی
 		if err := s.userRepo.UpdateWallet(ctx, userID, -product.Price); err != nil {
 			return fmt.Errorf("insufficient funds or wallet error: %v", err)
+		}
+
+		if err := s.userRepo.IncrementTotalSpent(ctx, userID, product.Price); err != nil {
+			return fmt.Errorf("failed to update total spent: %v", err)
 		}
 
 		// ب) رزرو و تحویل اکانت
