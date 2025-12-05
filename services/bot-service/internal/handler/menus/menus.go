@@ -14,13 +14,13 @@ import (
 )
 
 var (
-	// Main Menu
+	// Main Menu (دکمه‌های کیبورد پایین)
 	MainMenuMarkup = &telebot.ReplyMarkup{ResizeKeyboard: true}
 	BtnBuy         = MainMenuMarkup.Text("🛒 خرید اشتراک")
 	BtnProfile     = MainMenuMarkup.Text("👤 پروفایل")
 	BtnWallet      = MainMenuMarkup.Text("💳 کیف پول")
 	BtnSupport     = MainMenuMarkup.Text("📞 پشتیبانی")
-	BtnReferral = MainMenuMarkup.Text("🔗 دریافت لینک دعوت") 
+	BtnReferral    = MainMenuMarkup.Text("🔗 دریافت لینک دعوت")
 
 	// Back Button
 	BackMarkup    = &telebot.ReplyMarkup{ResizeKeyboard: true}
@@ -55,48 +55,14 @@ func NewHandler(botService *service.BotService, coreClient *core.Client, logger 
 	}
 }
 
+// MainMenu نمایش منوی اصلی (دکمه‌های پایین)
 func (h *Handler) MainMenu(c telebot.Context) error {
-	msg := "🏠 منوی اصلی\n\nچه کاری می‌خواهید انجام دهید؟"
-
-	inlineMainMenuMarkup := &telebot.ReplyMarkup{ResizeKeyboard: true}
-	btnBuy := inlineMainMenuMarkup.Data("🛒 خرید اشتراک", "buy")
-	btnProfile := inlineMainMenuMarkup.Data("👤 پروفایل", "profile")
-	btnWallet := inlineMainMenuMarkup.Data("💳 کیف پول", "wallet")
-	btnSupport := inlineMainMenuMarkup.Data("📞 پشتیبانی", "support")
-
-	inlineMainMenuMarkup.Inline(
-		inlineMainMenuMarkup.Row(btnBuy, btnProfile),
-		inlineMainMenuMarkup.Row(btnWallet, btnSupport),
-	)
+	msg := "🏠 **منوی اصلی**\n\nچه کاری می‌خواهید انجام دهید؟"
 
 	return c.Send(msg, &telebot.SendOptions{
-		ReplyMarkup: inlineMainMenuMarkup,
+		ParseMode:   telebot.ModeMarkdownV2,
+		ReplyMarkup: MainMenuMarkup,
 	})
-}
-
-// هندلر جدید برای نمایش لینک دعوت
-func (h *Handler) GetReferralLink(c telebot.Context) error {
-	user, err := h.botService.GetProfile(c)
-	if err != nil {
-		return c.Send("❌ خطا در دریافت اطلاعات کاربری.")
-	}
-
-	// ساخت لینک دعوت
-	// نام کاربری بات را باید از کانفیگ یا خود بات بگیرید. اینجا فرض می‌کنیم PermiaBot است.
-	botUsername := h.botService.GetBotUsername() 
-	refLink := fmt.Sprintf("https://t.me/%s?start=%s", botUsername, user.ReferralCode)
-
-	msg := fmt.Sprintf(
-		"🎁 **دعوت از دوستان**\n\n"+
-			"با دعوت دوستان خود به پرمیا، در خریدهای آن‌ها شریک شوید!\n\n"+
-			"🔗 **لینک اختصاصی شما:**\n`%s`\n\n"+
-			"👥 **تعداد دعوت‌های شما:** %d نفر\n\n"+
-			"👇 لینک بالا را برای دوستانتان ارسال کنید.",
-		refLink,
-		user.TotalReferrals, // این فیلد باید در مدل User وجود داشته باشد
-	)
-
-	return c.Send(msg, &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
 }
 
 // Buy Flow
@@ -118,7 +84,6 @@ func (h *Handler) Buy(c telebot.Context) error {
 		categories[p.Category] = true
 	}
 
-	// ساخت دکمه‌های پایین صفحه با ایموجی‌های اختصاصی
 	categoryMarkup := &telebot.ReplyMarkup{ResizeKeyboard: true}
 	var catRows []telebot.Row
 
@@ -138,6 +103,7 @@ func (h *Handler) Buy(c telebot.Context) error {
 	})
 }
 
+// Profile shows user information
 func (h *Handler) Profile(c telebot.Context) error {
 	h.logger.Infof("User %d viewing profile", c.Sender().ID)
 
@@ -147,13 +113,21 @@ func (h *Handler) Profile(c telebot.Context) error {
 		return c.Send("❌ بارگذاری پروفایل ناموفق بود. لطفا دوباره تلاش کنید.")
 	}
 
+	safeUsername := h.escapeMarkdown(user.Username)
+	if safeUsername == "" {
+		safeUsername = "بدون نام کاربری"
+	}
+
 	profileMsg := fmt.Sprintf(
 		"👤 *پروفایل شما*\n\n"+
 			"*نام کاربری:* @%s\n"+
 			"*شناسه تلگرام:* `%d`\n"+
-			"*عضویت از:* به‌زودی",
-		user.Username,
+			"*موجودی:* %.0f تومان\n"+
+			"*تعداد دعوت‌ها:* %d نفر",
+		safeUsername,
 		c.Sender().ID,
+		user.Balance,
+		user.TotalReferrals,
 	)
 
 	inlineBackMarkup := &telebot.ReplyMarkup{ResizeKeyboard: true}
@@ -235,8 +209,13 @@ func (h *Handler) ShowProducts(c telebot.Context, category string) error {
 	var inlineProdRows []telebot.Row
 
 	for _, p := range filtered {
-		// متن دکمه بدون escapeMarkdown
-		buttonText := fmt.Sprintf("%s - %.0f T", p.Title, p.Price)
+		// استفاده از Title اگر موجود بود، وگرنه نام ساده
+		displayName := p.Title
+		if displayName == "" {
+			displayName = fmt.Sprintf("محصول %.0f", p.Price)
+		}
+		
+		buttonText := fmt.Sprintf("%s - %.0f T", displayName, p.Price)
 		
 		inlineBtn := inlineProductsMarkup.Data(
 			buttonText,
@@ -249,7 +228,6 @@ func (h *Handler) ShowProducts(c telebot.Context, category string) error {
 
 	inlineProductsMarkup.Inline(inlineProdRows...)
 
-	// دریافت ایموجی مناسب برای عنوان پیام
 	emoji := h.getCategoryEmoji(category)
 	msg := fmt.Sprintf("%s *%s*\n\nبرای خرید یک محصول انتخاب کنید:", emoji, h.escapeMarkdown(category))
 
@@ -259,7 +237,7 @@ func (h *Handler) ShowProducts(c telebot.Context, category string) error {
 	})
 }
 
-// PreviewInvoice shows product details before purchase
+// PreviewInvoice (پیش‌فاکتور)
 func (h *Handler) PreviewInvoice(c telebot.Context, sku string) error {
 	products, err := h.botService.GetProducts()
 	if err != nil {
@@ -290,14 +268,14 @@ func (h *Handler) PreviewInvoice(c telebot.Context, sku string) error {
 			"🛍 *محصول:* %s\n"+
 			"📝 *توضیحات:* %s\n"+
 			"💰 *مبلغ قابل پرداخت:* %.0f تومان\n\n"+
-			"⚠️ لطفا قبل از تایید نهایی، اطلاعات بالا را بررسی کنید\\.\n"+
-			"در صورت داشتن کد تخفیف، فعلا پشتیبانی نمی‌شود \\(به زودی\\)\\.",
+			"⚠️ لطفا قبل از تایید نهایی، اطلاعات بالا را بررسی کنید\\.\n",
 		h.escapeMarkdown(targetProduct.Title),
 		h.escapeMarkdown(description),
 		targetProduct.Price,
 	)
 
 	confirmMarkup := &telebot.ReplyMarkup{ResizeKeyboard: true}
+	// ارسال pay:SKU برای تایید نهایی
 	btnConfirm := confirmMarkup.Data("✅ تایید و پرداخت نهایی", fmt.Sprintf("pay:%s", sku))
 	btnCancel := confirmMarkup.Data("❌ انصراف", "main_menu")
 
@@ -322,7 +300,7 @@ func (h *Handler) PreviewInvoice(c telebot.Context, sku string) error {
 	return nil
 }
 
-// ProcessProductOrder handles product order creation
+// ProcessProductOrder (خرید نهایی - اصلاح شده با ۳ آرگومان)
 func (h *Handler) ProcessProductOrder(c telebot.Context, sku string) error {
 	h.logger.Infof("User %d ordering sku: %s", c.Sender().ID, sku)
 
@@ -331,7 +309,9 @@ func (h *Handler) ProcessProductOrder(c telebot.Context, sku string) error {
 		return c.Send("❌ خطا در پردازش سفارش.")
 	}
 
+	// ✅ اصلاح شده: فراخوانی CreateOrder فقط با ۳ آرگومان (مطابق client.go)
 	order, err := h.coreClient.CreateOrder(user.ID, c.Sender().ID, sku)
+	
 	if err != nil {
 		h.logger.Errorf("Failed to create order: %v", err)
 		if strings.Contains(err.Error(), "insufficient") {
@@ -424,6 +404,28 @@ func (h *Handler) ProcessChargeAmount(c telebot.Context, amountStr string) error
 	})
 }
 
+func (h *Handler) GetReferralLink(c telebot.Context) error {
+	user, err := h.botService.GetProfile(c)
+	if err != nil {
+		return c.Send("❌ خطا در دریافت اطلاعات کاربری.")
+	}
+
+	botUsername := h.botService.GetBotUsername() 
+	refLink := fmt.Sprintf("https://t.me/%s?start=%s", botUsername, user.ReferralCode)
+
+	msg := fmt.Sprintf(
+		"🎁 **دعوت از دوستان**\n\n"+
+			"با دعوت دوستان خود به پرمیا، در خریدهای آن‌ها شریک شوید!\n\n"+
+			"🔗 **لینک اختصاصی شما:**\n`%s`\n\n"+
+			"👥 **تعداد دعوت‌های شما:** %d نفر\n\n"+
+			"👇 لینک بالا را برای دوستانتان ارسال کنید.",
+		refLink,
+		user.TotalReferrals,
+	)
+
+	return c.Send(msg, &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+}
+
 // Helper function to escape markdown characters
 func (h *Handler) escapeMarkdown(s string) string {
 	var result strings.Builder
@@ -440,8 +442,6 @@ func (h *Handler) escapeMarkdown(s string) string {
 // Helper: اختصاص ایموجی به دسته‌بندی‌ها
 func (h *Handler) getCategoryEmoji(category string) string {
 	catLower := strings.ToLower(category)
-	
-	// لیست ایموجی‌های اختصاصی
 	if strings.Contains(catLower, "gpt") {
 		return "🤖"
 	}
@@ -457,7 +457,5 @@ func (h *Handler) getCategoryEmoji(category string) string {
 	if strings.Contains(catLower, "tool") {
 		return "🔧"
 	}
-	
-	// ایموجی پیش‌فرض
 	return "📂"
 }
