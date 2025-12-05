@@ -32,6 +32,8 @@ type Order struct {
 
 	PaymentMethod string `gorm:"size:50" json:"payment_method"`
 	DeliveredData string `gorm:"type:text" json:"delivered_data"`
+	CouponCode     string  `gorm:"size:50" json:"coupon_code"`
+	DiscountAmount float64 `gorm:"type:decimal(15,0);default:0" json:"discount_amount"`
 
 	CreatedAt   time.Time  `json:"created_at"`
 	DeliveredAt *time.Time `json:"delivered_at"`

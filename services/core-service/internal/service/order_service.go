@@ -17,6 +17,7 @@ type OrderService struct {
 	productRepo domain.ProductRepository
 	accountRepo domain.AccountRepository
 	vccProvider domain.VCCProvider
+	couponSvc   *CouponService
 	db          *gorm.DB
 }
 
@@ -26,6 +27,7 @@ func NewOrderService(
 	productRepo domain.ProductRepository,
 	accountRepo domain.AccountRepository,
 	vccProvider domain.VCCProvider,
+	couponSvc *CouponService,
 	db *gorm.DB,
 ) *OrderService {
 	return &OrderService{
@@ -34,6 +36,7 @@ func NewOrderService(
 		productRepo: productRepo,
 		accountRepo: accountRepo,
 		vccProvider: vccProvider,
+		couponSvc:   couponSvc,
 		db:          db,
 	}
 }
@@ -46,7 +49,8 @@ type PurchaseResult struct {
 	Status        string  `json:"status"`
 	DeliveredData string  `json:"delivered_data"`
 }
-func (s *OrderService) PurchaseFlow(ctx context.Context, userID uint, productSKU string) (*PurchaseResult, error) {
+
+func (s *OrderService) PurchaseFlow(ctx context.Context, userID uint, productSKU string, couponCode string) (*PurchaseResult, error) {
 	var result PurchaseResult
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
@@ -58,9 +62,29 @@ func (s *OrderService) PurchaseFlow(ctx context.Context, userID uint, productSKU
 		if err != nil {
 			return err
 		}
-		
+
+		finalPrice := product.Price
+		discountAmount := 0.0
+
+		if couponCode != "" {
+			// اعتبارسنجی مجدد کد تخفیف قبل از مصرف
+			validPrice, discount, err := s.couponSvc.ValidateCoupon(ctx, couponCode, userID, product.Price)
+			if err != nil {
+				return fmt.Errorf("کد تخفیف نامعتبر است: %v", err)
+			}
+			finalPrice = validPrice
+			discountAmount = discount
+
+			// ثبت استفاده از کوپن (داخل تراکنش)
+			// چون متد IncrementUsage روی db اصلی است، اینجا دستی کوئری می‌زنیم تا در تراکنش باشد
+			if err := tx.Model(&domain.Coupon{}).Where("code = ?", couponCode).
+				Update("used_count", gorm.Expr("used_count + 1")).Error; err != nil {
+				return err
+			}
+		}
+
 		// ✅ استانداردسازی متن خطا برای هندلینگ راحت‌تر
-		if user.WalletBalance < product.Price {
+		if user.WalletBalance < finalPrice {
 			return errors.New("insufficient funds")
 		}
 
@@ -91,37 +115,53 @@ func (s *OrderService) PurchaseFlow(ctx context.Context, userID uint, productSKU
 					MaxUsers: product.Capacity, Status: "AVAILABLE",
 					CreatedAt: time.Now(), UpdatedAt: time.Now(),
 				}
-				if err := tx.Create(&newGroup).Error; err != nil { return err }
+				if err := tx.Create(&newGroup).Error; err != nil {
+					return err
+				}
 				account = &newGroup
 			}
 			account.CurrentUsers++
-			if account.CurrentUsers >= account.MaxUsers { account.Status = "FILLED" }
-			if err := tx.Save(account).Error; err != nil { return err }
-			
+			if account.CurrentUsers >= account.MaxUsers {
+				account.Status = "FILLED"
+			}
+			if err := tx.Save(account).Error; err != nil {
+				return err
+			}
+
 			assignedAccount = account
 			deliveryInfo = fmt.Sprintf("Email: %s\nPass: %s", account.Email, account.Password)
-			
+
 		default:
 			return fmt.Errorf("invalid product type")
 		}
 
-// تغییر: آپدیت همزمان کیف پول و مجموع خرید
+		// تغییر: آپدیت همزمان کیف پول و مجموع خرید
 		if err := tx.Model(&domain.User{}).Where("id = ?", userID).
 			Updates(map[string]interface{}{
-				"wallet_balance": gorm.Expr("wallet_balance - ?", product.Price),
-				"total_spent":    gorm.Expr("total_spent + ?", product.Price),
+				"wallet_balance": gorm.Expr("wallet_balance - ?", finalPrice),
+				"total_spent":    gorm.Expr("total_spent + ?", finalPrice),
 			}).Error; err != nil {
 			return err
 		}
 
 		newOrder := domain.Order{
-			OrderNumber: fmt.Sprintf("ORD-%d-%d", userID, time.Now().Unix()),
-			UserID: userID, ProductID: product.ID, Amount: product.Price,
-			Status: domain.OrderStatus(orderStatus), DeliveredData: deliveryInfo, CreatedAt: time.Now(),
+			OrderNumber:    fmt.Sprintf("ORD-%d-%d", userID, time.Now().Unix()),
+			UserID:         userID,
+			ProductID:      product.ID,
+			Amount:         finalPrice,     // مبلغ پرداختی
+			DiscountAmount: discountAmount, // مبلغ تخفیف
+			CouponCode:     couponCode,     // کد استفاده شده
+			Status:         domain.OrderStatus(orderStatus),
+			DeliveredData:  deliveryInfo,
+			CreatedAt:      time.Now(),
 		}
-		if assignedAccount != nil { newOrder.AccountID = &assignedAccount.ID }
+		if assignedAccount != nil {
+			newOrder.AccountID = &assignedAccount.ID
+		}
 
-		if err := tx.Create(&newOrder).Error; err != nil { return err }
+		if err := tx.Create(&newOrder).Error; err != nil {
+			return err
+		}
 
 		result = PurchaseResult{
 			OrderID: newOrder.ID, OrderNumber: newOrder.OrderNumber,
@@ -130,7 +170,9 @@ func (s *OrderService) PurchaseFlow(ctx context.Context, userID uint, productSKU
 		return nil
 	})
 
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	return &result, nil
 }
 
@@ -146,14 +188,14 @@ func (s *OrderService) GetOrderByID(ctx context.Context, id uint) (*domain.Order
 
 // GetUserSubscriptions بازیابی سفارشات کاربر بر اساس تلگرام آیدی
 func (s *OrderService) GetUserSubscriptions(ctx context.Context, telegramID int64) ([]domain.Order, error) {
-    // 1. پیدا کردن کاربر از روی تلگرام آیدی
-    user, err := s.userRepo.GetByTelegramID(ctx, telegramID)
-    if err != nil {
-        return nil, err // کاربر پیدا نشد
-    }
+	// 1. پیدا کردن کاربر از روی تلگرام آیدی
+	user, err := s.userRepo.GetByTelegramID(ctx, telegramID)
+	if err != nil {
+		return nil, err // کاربر پیدا نشد
+	}
 
-    // 2. دریافت تاریخچه سفارشات
-    return s.orderRepo.GetHistoryByUserID(ctx, user.ID)
+	// 2. دریافت تاریخچه سفارشات
+	return s.orderRepo.GetHistoryByUserID(ctx, user.ID)
 }
 
 // CreateOrder ایجاد سفارش جدید
@@ -199,16 +241,16 @@ func (s *OrderService) CreateOrder(ctx context.Context, userID, productID uint, 
 		if product.Type == "shared" || product.Type == "ready_made" {
 			// نکته: در پیاده‌سازی واقعی GetAvailableAccount حتما از قفل رکورد استفاده کنید
 			account, err := s.accountRepo.GetAvailableAccount(ctx, product.SKU)
-			
+
 			if err == nil && account != nil {
 				order.AccountID = &account.ID
-				
+
 				// ✅ اصلاح شده: استفاده از Email به جای Username
-				userCredential := account.Email 
+				userCredential := account.Email
 				if userCredential == "" {
 					userCredential = fmt.Sprintf("%d", account.ID) // فال‌بک به ID اگر ایمیل نبود
 				}
-				
+
 				order.DeliveredData = fmt.Sprintf("User: %s\nPass: %s", userCredential, account.Password)
 
 				// مارک کردن به عنوان فروخته شده

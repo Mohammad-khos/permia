@@ -61,8 +61,8 @@ func TestGetOrdersAPI(t *testing.T) {
 
 	mockOrderRepo.On("GetAllOrders", mock.Anything).Return(mockOrders, nil)
 
-	// ایجاد سرویس و هندلر
-	orderService := service.NewOrderService(mockOrderRepo, mockUserRepo, nil, nil, nil, nil)
+	// اصلاح: اضافه کردن nil برای CouponService (آرگومان ششم)
+	orderService := service.NewOrderService(mockOrderRepo, mockUserRepo, nil, nil, nil, nil, nil)
 	orderHandler := handler.NewOrderHandler(orderService, nil)
 
 	// ایجاد روتر
@@ -111,8 +111,8 @@ func TestGetOrderByIDAPI(t *testing.T) {
 	mockOrderRepo.On("GetByID", mock.Anything, uint(1)).Return(mockOrder, nil)
 	mockOrderRepo.On("GetByID", mock.Anything, uint(999)).Return(nil, gorm.ErrRecordNotFound)
 
-	// ایجاد سرویس و هندلر
-	orderService := service.NewOrderService(mockOrderRepo, mockUserRepo, nil, nil, nil, nil)
+	// اصلاح: اضافه کردن nil برای CouponService (آرگومان ششم)
+	orderService := service.NewOrderService(mockOrderRepo, mockUserRepo, nil, nil, nil, nil, nil)
 	orderHandler := handler.NewOrderHandler(orderService, nil)
 
 	// ایجاد روتر
@@ -181,7 +181,8 @@ func TestOrderHistoryAPI(t *testing.T) {
 	mockOrderRepo.On("GetHistoryByUserID", mock.Anything, userID).Return(mockOrders, nil)
 	mockOrderRepo.On("GetAllOrders", mock.Anything).Return(mockOrders, nil)
 
-	orderService := service.NewOrderService(mockOrderRepo, nil, nil, nil, nil, nil)
+	// اصلاح: اضافه کردن nil برای CouponService (آرگومان ششم)
+	orderService := service.NewOrderService(mockOrderRepo, nil, nil, nil, nil, nil, nil)
 
 	router := gin.New()
 	router.GET("/api/v1/users/:id/orders", func(c *gin.Context) {

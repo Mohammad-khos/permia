@@ -64,6 +64,7 @@ func main() {
 	accountRepo := repository.NewAccountRepository(db)
 	orderRepo := repository.NewOrderRepository(db)
 	paymentRepo := repository.NewPaymentRepository(db)
+	couponRepo := repository.NewCouponRepository(db) // اضافه شد
 
 	//--- VCC Provider ---
 	brocardClient := brocard.NewBrocardClient()
@@ -74,7 +75,17 @@ func main() {
 
 	userService := service.NewUserService(userRepo)
 	productService := service.NewProductService(productRepo)
-	orderService := service.NewOrderService(orderRepo, userRepo, productRepo, accountRepo, brocardClient, db)
+	couponService := service.NewCouponService(couponRepo)
+	// اصلاح: تزریق couponService به orderService
+	orderService := service.NewOrderService(
+		orderRepo,
+		userRepo,
+		productRepo,
+		accountRepo,
+		brocardClient,
+		couponService, // آرگومان جدید
+		db,
+	)
 	paymentService := service.NewPaymentService(paymentRepo, orderRepo, userRepo, zarinpalClient, db, appLogger)
 	adminService := service.NewAdminService(accountRepo, orderRepo, productRepo, db, appLogger)
 
@@ -84,6 +95,7 @@ func main() {
 	orderHandler := handler.NewOrderHandler(orderService, userService)
 	paymentHandler := handler.NewPaymentHandler(paymentService)
 	adminHandler := handler.NewAdminHandler(adminService, productService)
+	couponHandler := handler.NewCouponHandler(couponService, userService)
 
 	// 6. تنظیمات Gin
 	if cfg.AppEnv == "production" {
@@ -118,6 +130,13 @@ func main() {
 		{
 			payment.POST("/charge", paymentHandler.ChargePayment)
 			payment.GET("/verify", paymentHandler.VerifyPayment)
+		}
+
+		// Coupon Routes
+		coupons := api.Group("/coupons")
+		{
+			coupons.POST("/validate", couponHandler.Validate)
+			coupons.GET("/user/:telegram_id", couponHandler.GetMyCoupons)
 		}
 
 		// Order Routes

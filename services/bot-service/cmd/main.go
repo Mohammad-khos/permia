@@ -73,7 +73,7 @@ func main() {
 	// ---------------------------------------------------------
 	// تنظیمات منوی بات و توضیحات (Bot Profile)
 	// ---------------------------------------------------------
-	
+
 	// 1. تنظیم منوی دستورات (کنار کادر متن)
 	botCommands := []telebot.Command{
 		{Text: "start", Description: "🚀 شروع و نمایش منوی اصلی"},
@@ -115,6 +115,11 @@ func registerCallbackHandler(bot *telebot.Bot, menuHandler *menus.Handler, sessi
 		logger.Debugf("Received callback from %d: %s", userID, data)
 
 		defer c.Respond()
+
+		if strings.HasPrefix(data, "coupon:") {
+			sku := strings.TrimPrefix(data, "coupon:")
+			return menuHandler.AskForCoupon(c, sku)
+		}
 
 		sessionRepo.SetState(userID, domain.StateNone)
 
@@ -181,6 +186,10 @@ func registerMessageHandlers(bot *telebot.Bot, menuHandler *menus.Handler, sessi
 			return menuHandler.ProcessChargeAmount(c, text)
 		}
 
+		if state == domain.StateWaitingForCoupon {
+			return menuHandler.ValidateAndApplyCoupon(c, text)
+		}
+
 		// Handle Main Menu Actions
 		switch text {
 		case "🛒 خرید اشتراک":
@@ -204,8 +213,9 @@ func registerMessageHandlers(bot *telebot.Bot, menuHandler *menus.Handler, sessi
 		case "🔗 دریافت لینک دعوت":
 			sessionRepo.SetState(userID, domain.StateNone)
 			return menuHandler.GetReferralLink(c)
+		case "🎁 کدهای تخفیف من":
+			return menuHandler.GetMyCoupons(c) // دکمه جدید
 		}
-		
 
 		// Handle Category Selection (Dynamic Emojis)
 		if isCategory, catName := extractCategory(text); isCategory {
@@ -223,7 +233,7 @@ func registerMessageHandlers(bot *telebot.Bot, menuHandler *menus.Handler, sessi
 func extractCategory(text string) (bool, string) {
 	// لیست ایموجی‌هایی که در menus.go استفاده می‌شوند
 	prefixes := []string{"📂 ", "🤖 ", "💎 ", "🎭 ", "🎨 ", "🚀 ", "🔧 "}
-	
+
 	for _, p := range prefixes {
 		if strings.HasPrefix(text, p) {
 			return true, strings.TrimPrefix(text, p)

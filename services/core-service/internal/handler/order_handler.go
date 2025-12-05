@@ -29,6 +29,7 @@ type CreateOrderRequest struct {
 	UserID     uint   `json:"user_id"`      // ارسالی از سمت بات
 	TelegramID int64  `json:"telegram_id"`  // برای پشتیبانی از کدهای قدیمی
 	SKU        string `json:"sku" binding:"required"`
+	CouponCode string `json:"coupon_code"`
 }
 
 func NewOrderHandler(orderSvc *service.OrderService, userSvc *service.UserService) *OrderHandler {
@@ -69,7 +70,7 @@ func (h *OrderHandler) CreateOrder(c *gin.Context) {
 	}
 
 	// 3. انجام خرید با شناسه نهایی کاربر
-	result, err := h.orderSvc.PurchaseFlow(c, finalUserID, req.SKU)
+	result, err := h.orderSvc.PurchaseFlow(c, finalUserID, req.SKU , req.CouponCode)
 	if err != nil {
 		// خطا را چک می‌کنیم تا اگر مربوط به موجودی بود، کد مناسب برگردانیم
 		if err.Error() == "موجودی کافی نیست" || err.Error() == "insufficient funds" {

@@ -123,6 +123,7 @@ type CreateOrderRequest struct {
 	UserID     uint   `json:"user_id"`
 	TelegramID int64  `json:"telegram_id"` // فیلد ضروری جدید
 	SKU        string `json:"sku"`
+	CouponCode string `json:"coupon_code"` // فیلد جدید برای کد کوپن
 }
 
 type CreateOrderResponse struct {
@@ -134,11 +135,12 @@ type CreateOrderResponse struct {
 }
 
 // CreateOrder متد آپدیت شده: دریافت telegramID به عنوان پارامتر دوم
-func (c *Client) CreateOrder(userID uint, telegramID int64, sku string) (*CreateOrderResponse, error) {
+func (c *Client) CreateOrder(userID uint, telegramID int64, sku string , couponCode string) (*CreateOrderResponse, error) {
 	payload := CreateOrderRequest{
 		UserID:     userID,
 		TelegramID: telegramID,
 		SKU:        sku,
+		CouponCode: couponCode,
 	}
 
 	// ✅ تغییر مهم: استفاده از ساختار لفاف‌پیچی شده (Wrapper)
@@ -215,6 +217,43 @@ func (c *Client) GetPaymentLink(userID uint, amount float64) (string, error) {
 	}
 
 	return result.VerificationURL, nil
+}
+
+// متد جدید: ValidateCoupon
+func (c *Client) ValidateCoupon(telegramID int64, code string, amount float64) (float64, error) {
+	payload := map[string]interface{}{
+		"telegram_id": telegramID,
+		"code":        code,
+		"amount":      amount,
+	}
+	
+	var res struct {
+		Success bool `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			FinalPrice float64 `json:"final_price"`
+			Valid      bool    `json:"valid"`
+		} `json:"data"`
+	}
+
+	_, err := c.resty.R().SetBody(payload).SetResult(&res).Post("/coupons/validate")
+	
+	if err != nil {
+		return 0, err
+	}
+	if !res.Success {
+		return 0, fmt.Errorf(res.Message)
+	}
+	
+	return res.Data.FinalPrice, nil
+}
+// متد جدید: GetUserCoupons
+func (c *Client) GetUserCoupons(telegramID int64) ([]domain.Coupon, error) {
+	var res struct {
+		Data []domain.Coupon `json:"data"`
+	}
+	_, err := c.resty.R().SetResult(&res).Get(fmt.Sprintf("/coupons/user/%d", telegramID))
+	return res.Data, err
 }
 
 func contains(str, substr string) bool {

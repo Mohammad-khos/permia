@@ -25,10 +25,13 @@ var (
 	// Back Button
 	BackMarkup    = &telebot.ReplyMarkup{ResizeKeyboard: true}
 	BtnBackToMain = BackMarkup.Text("🔙 بازگشت به منوی اصلی")
-
+	
 	// Wallet Menu
 	WalletMarkup    = &telebot.ReplyMarkup{ResizeKeyboard: true}
 	BtnChargeWallet = WalletMarkup.Text("➕ شارژ کیف پول")
+	
+	// Coupons Button
+	BtnMyCoupons = MainMenuMarkup.Text("🎁 کدهای تخفیف من")
 )
 
 type Handler struct {
@@ -161,7 +164,11 @@ func (h *Handler) Profile(c telebot.Context) error {
 			))
 		}
 	}
-
+	profileMenu := &telebot.ReplyMarkup{ResizeKeyboard: true}
+    profileMenu.Reply(
+        profileMenu.Row(BtnMyCoupons), // اضافه کردن دکمه کوپن
+        profileMenu.Row(BtnBackToMain),
+    )
 	// دکمه بازگشت
 	inlineBackMarkup := &telebot.ReplyMarkup{ResizeKeyboard: true}
 	btnBack := inlineBackMarkup.Data("🔙 بازگشت به منوی اصلی", "main_menu")
@@ -169,7 +176,7 @@ func (h *Handler) Profile(c telebot.Context) error {
 
 	return c.Send(sb.String(), &telebot.SendOptions{
 		ParseMode:   telebot.ModeMarkdownV2,
-		ReplyMarkup: inlineBackMarkup,
+		ReplyMarkup: profileMenu,
 	})
 }
 func (h *Handler) Wallet(c telebot.Context) error {
@@ -309,10 +316,12 @@ func (h *Handler) PreviewInvoice(c telebot.Context, sku string) error {
 	confirmMarkup := &telebot.ReplyMarkup{ResizeKeyboard: true}
 	// ارسال pay:SKU برای تایید نهایی
 	btnConfirm := confirmMarkup.Data("✅ تایید و پرداخت نهایی", fmt.Sprintf("pay:%s", sku))
+	btnCoupon := confirmMarkup.Data("🎟 ثبت کد تخفیف", fmt.Sprintf("coupon:%s", sku)) // دکمه جدید
 	btnCancel := confirmMarkup.Data("❌ انصراف", "main_menu")
 
 	confirmMarkup.Inline(
 		confirmMarkup.Row(btnConfirm),
+		confirmMarkup.Row(btnCoupon), // اضافه شد
 		confirmMarkup.Row(btnCancel),
 	)
 
@@ -342,7 +351,11 @@ func (h *Handler) ProcessProductOrder(c telebot.Context, sku string) error {
 	}
 
 	// ✅ اصلاح شده: فراخوانی CreateOrder فقط با ۳ آرگومان (مطابق client.go)
-	order, err := h.coreClient.CreateOrder(user.ID, c.Sender().ID, sku)
+	couponCode := h.botService.GetDraft(c.Sender().ID, "active_coupon")
+	order, err := h.coreClient.CreateOrder(user.ID, c.Sender().ID, sku ,couponCode)
+
+	// پاک‌کردن کوپن و پیش‌نویس پس از استفاده
+	h.botService.ClearDraft(c.Sender().ID)
 	
 	if err != nil {
 		h.logger.Errorf("Failed to create order: %v", err)
@@ -456,6 +469,71 @@ func (h *Handler) GetReferralLink(c telebot.Context) error {
 	)
 
 	return c.Send(msg, &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+}
+
+// GetMyCoupons نمایش کدهای تخفیف کاربر
+func (h *Handler) GetMyCoupons(c telebot.Context) error {
+    coupons, err := h.coreClient.GetUserCoupons(c.Sender().ID)
+    if err != nil || len(coupons) == 0 {
+        return c.Send("📭 شما در حال حاضر کد تخفیف فعالی ندارید.")
+    }
+
+    var sb strings.Builder
+    sb.WriteString("🎁 **کدهای تخفیف شما:**\n\n")
+    for _, coup := range coupons {
+        sb.WriteString(fmt.Sprintf("🎟 کد: `%s`\n٪ تخفیف: %.0f%%\n\n", coup.Code, coup.Percent))
+    }
+    
+    return c.Send(sb.String(), &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
+}
+
+// وقتی کاربر روی دکمه "ثبت کد تخفیف" زد
+func (h *Handler) AskForCoupon(c telebot.Context, sku string) error {
+    h.botService.SetDraft(c.Sender().ID, "sku_for_coupon", sku)
+    h.botService.SetUserState(c.Sender().ID, domain.StateWaitingForCoupon)
+    return c.Send("🎟 لطفا کد تخفیف خود را ارسال کنید:")
+}
+
+// وقتی کاربر کد را نوشت
+// نسخه اصلاح شده تابع ValidateAndApplyCoupon
+func (h *Handler) ValidateAndApplyCoupon(c telebot.Context, code string) error {
+	userID := c.Sender().ID
+	sku := h.botService.GetDraft(userID, "sku_for_coupon")
+	
+	products, _ := h.botService.GetProducts()
+	var price float64
+	var title string
+	for _, p := range products {
+		if p.SKU == sku {
+			price = p.Price
+			title = p.Title
+			break
+		}
+	}
+
+	newPrice, err := h.coreClient.ValidateCoupon(userID, code, price)
+	if err != nil {
+		h.botService.SetUserState(userID, domain.StateNone)
+		return c.Send(fmt.Sprintf("❌ خطا: %v", err))
+	}
+
+	h.botService.SetDraft(userID, "active_coupon", code)
+	h.botService.SetUserState(userID, domain.StateNone)
+
+	// ✅ اصلاح شده: اضافه کردن \\ قبل از !
+	msg := fmt.Sprintf(
+		"✅ *کد تخفیف اعمال شد\\!*\n\n🛍 محصول: %s\n💰 قیمت جدید: %.0f T",
+		h.escapeMarkdown(title), newPrice,
+	)
+
+	confirmMarkup := &telebot.ReplyMarkup{}
+	btnPay := confirmMarkup.Data("✅ پرداخت مبلغ نهایی", fmt.Sprintf("pay:%s", sku))
+	confirmMarkup.Inline(confirmMarkup.Row(btnPay))
+
+	return c.Send(msg, &telebot.SendOptions{
+		ParseMode:   telebot.ModeMarkdownV2,
+		ReplyMarkup: confirmMarkup,
+	})
 }
 
 // Helper function to escape markdown characters
