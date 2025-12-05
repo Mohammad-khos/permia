@@ -103,14 +103,22 @@ func (h *Handler) Buy(c telebot.Context) error {
 	})
 }
 
-// Profile shows user information
+// Profile shows user information and subscriptions
 func (h *Handler) Profile(c telebot.Context) error {
 	h.logger.Infof("User %d viewing profile", c.Sender().ID)
 
+	// ۱. دریافت اطلاعات کاربر
 	user, err := h.botService.GetProfile(c)
 	if err != nil {
 		h.logger.Errorf("Failed to get profile: %v", err)
 		return c.Send("❌ بارگذاری پروفایل ناموفق بود. لطفا دوباره تلاش کنید.")
+	}
+
+	// ۲. دریافت اشتراک‌های فعال
+	subs, err := h.botService.GetSubscriptions(c.Sender().ID)
+	// اگر ارور داد مهم نیست، لیست خالی نشان می‌دهیم (نباید کل پروفایل قطع شود)
+	if err != nil {
+		h.logger.Warnf("Failed to fetch subs for user %d: %v", c.Sender().ID, err)
 	}
 
 	safeUsername := h.escapeMarkdown(user.Username)
@@ -118,28 +126,52 @@ func (h *Handler) Profile(c telebot.Context) error {
 		safeUsername = "بدون نام کاربری"
 	}
 
-	profileMsg := fmt.Sprintf(
+	// ۳. ساخت متن پروفایل
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf(
 		"👤 *پروفایل شما*\n\n"+
 			"*نام کاربری:* @%s\n"+
 			"*شناسه تلگرام:* `%d`\n"+
 			"*موجودی:* %.0f تومان\n"+
-			"*تعداد دعوت‌ها:* %d نفر",
+			"*تعداد دعوت‌ها:* %d نفر\n\n",
 		safeUsername,
 		c.Sender().ID,
 		user.Balance,
 		user.TotalReferrals,
-	)
+	))
 
+	// ۴. اضافه کردن لیست اشتراک‌ها به پیام
+	sb.WriteString("📦 *اشتراک‌های فعال شما:*\n")
+	
+	if len(subs) == 0 {
+		sb.WriteString("_(هیچ سرویس فعالی ندارید)_\n")
+	} else {
+		for _, sub := range subs {
+			// ایمن کردن متن‌ها برای مارک‌داون
+			pName := h.escapeMarkdown(sub.ProductName)
+			expDate := h.escapeMarkdown(sub.ExpiresAt)
+			delData := h.escapeMarkdown(sub.DeliveredData)
+
+			sb.WriteString(fmt.Sprintf(
+				"➖➖➖➖➖➖\n"+
+				"💎 *%s*\n"+
+				"📅 انقضا: %s\n"+
+				"🔑 اطلاعات:\n`%s`\n",
+				pName, expDate, delData,
+			))
+		}
+	}
+
+	// دکمه بازگشت
 	inlineBackMarkup := &telebot.ReplyMarkup{ResizeKeyboard: true}
 	btnBack := inlineBackMarkup.Data("🔙 بازگشت به منوی اصلی", "main_menu")
 	inlineBackMarkup.Inline(inlineBackMarkup.Row(btnBack))
 
-	return c.Send(profileMsg, &telebot.SendOptions{
+	return c.Send(sb.String(), &telebot.SendOptions{
 		ParseMode:   telebot.ModeMarkdownV2,
 		ReplyMarkup: inlineBackMarkup,
 	})
 }
-
 func (h *Handler) Wallet(c telebot.Context) error {
 	h.logger.Infof("User %d viewing wallet", c.Sender().ID)
 

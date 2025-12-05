@@ -85,6 +85,10 @@ func (s *BotService) GetUserSubscriptions(telegramID int64) ([]domain.Subscripti
 	return subs, nil
 }
 
+func (s *BotService) GetSubscriptions(telegramID int64) ([]domain.Subscription, error) {
+	return s.coreClient.GetUserSubscriptions(telegramID)
+}
+
 func (s *BotService) SetUserState(userID int64, state domain.UserState) {
 	s.sessionRepo.SetState(userID, state)
 }

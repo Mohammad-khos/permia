@@ -169,22 +169,29 @@ func (c *Client) CreateOrder(userID uint, telegramID int64, sku string) (*Create
 	return &response.Data, nil
 }
 
-// GetUserSubscriptions دریافت لیست اشتراک‌ها
+// GetUserSubscriptions لیست اشتراک‌های کاربر را می‌گیرد
 func (c *Client) GetUserSubscriptions(telegramID int64) ([]domain.Subscription, error) {
-	var response struct {
-		Data []domain.Subscription `json:"data"`
+	var res struct {
+		Success bool                  `json:"success"`
+		Message string                `json:"message"`
+		Data    []domain.Subscription `json:"data"`
 	}
 
+	// طبق کد Core، این اندپوینت به هدر X-Telegram-ID نیاز دارد
 	resp, err := c.resty.R().
 		SetHeader("X-Telegram-ID", fmt.Sprintf("%d", telegramID)).
-		SetResult(&response).
+		SetResult(&res).
 		Get("/users/subscriptions")
 
-	if err != nil || resp.IsError() {
-		return nil, err
+	if err != nil {
+		c.logger.Errorf("Failed to get subscriptions: %v", err)
+		return nil, fmt.Errorf("service unavailable")
+	}
+	if resp.IsError() {
+		return nil, fmt.Errorf("failed to fetch subscriptions")
 	}
 
-	return response.Data, nil
+	return res.Data, nil
 }
 
 // GetPaymentLink دریافت لینک پرداخت
